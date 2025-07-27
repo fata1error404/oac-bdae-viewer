@@ -34,8 +34,8 @@ public:
     glm::vec3 Right;    // positive x-axis
 
     // Euler angles
-    float Pitch;
-    float Yaw;
+    float Pitch; // vertical rotation (look up / down)
+    float Yaw;   // horizontal rotation (look left / right)
 
     // camera options
     float MovementSpeed;

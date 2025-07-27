@@ -49,11 +49,14 @@ Camera ourCamera;
 float deltaTime = 0.0f; // time between current frame and last frame
 float lastFrame = 0.0f; // time of last frame
 
-bool firstMouse = true;                 // flag to check if the mouse movement is being processed for the first time
-float lastX = DEFAULT_SCR_WIDTH / 2.0;  // starting cursor position (x-axis)
-float lastY = DEFAULT_SCR_HEIGHT / 2.0; // starting cursor position (y-axis)
+bool firstMouse = true;                  // flag to check if the mouse movement is being processed for the first time
+double lastX = DEFAULT_SCR_WIDTH / 2.0;  // starting cursor position (x-axis)
+double lastY = DEFAULT_SCR_HEIGHT / 2.0; // starting cursor position (y-axis)
 
 // viewer variables
+float meshPitch = 0.0f;
+float meshYaw = 0.0f;
+float meshRotationSensitivity = 0.3f;
 bool displayBaseMesh = false;      // flag that indicates base / textured mesh display mode
 bool modelLoaded = false;          // flag that indicates whether to display model info and settings
 bool fileDialogOpen = false;       // flag that indicates whether to block all background inputs (when the file browsing dialog is open)
@@ -66,6 +69,7 @@ std::vector<unsigned int> EBOs;
 std::vector<float> vertices;
 std::vector<std::vector<unsigned short>> indices;
 std::vector<unsigned int> textures;
+glm::vec3 meshCenter;
 
 int main()
 {
@@ -91,8 +95,8 @@ int main()
     // set OpenGL context and callback
     glfwMakeContextCurrent(window);
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
-    glfwSetScrollCallback(window, scroll_callback);   // register scroll callback
-    glfwSetCursorPosCallback(window, mouse_callback); // register mouse callback
+    glfwSetScrollCallback(window, scroll_callback);   // register mouse wheel callback
+    glfwSetCursorPosCallback(window, mouse_callback); // register mouse movement callback
     glfwSetKeyCallback(window, key_callback);         // register key callback
 
     // load all OpenGL function pointers
@@ -165,6 +169,8 @@ int main()
             processInput(window);
 
         // prepare ImGui for a new frame
+        // _____________________________
+
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
@@ -232,11 +238,17 @@ int main()
 
         ImGui::End();
 
+        // _____________________________
+
         glClearColor(0.85f, 0.85f, 0.85f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); // clear the color buffer (fill the screen with a clear color) and the depth buffer; otherwise the information of the previous frame stays in these buffers
 
         // update dynamic shader uniforms on GPU
         glm::mat4 model = glm::mat4(1.0f);
+        model = glm::translate(model, meshCenter); // a trick to build the correct model matrix that rotates the mesh around its center
+        model = glm::rotate(model, glm::radians(meshPitch), glm::vec3(1, 0, 0));
+        model = glm::rotate(model, glm::radians(meshYaw), glm::vec3(0, 1, 0));
+        model = glm::translate(model, -meshCenter);
         glm::mat4 view = ourCamera.GetViewMatrix();
         glm::mat4 projection = glm::perspective(glm::radians(ourCamera.Zoom), (float)currentScreenWidth / (float)currentScreenHeight, 0.1f, 1000.0f);
 
@@ -331,18 +343,6 @@ void mouse_callback(GLFWwindow *window, double xpos, double ypos)
     if (fileDialogOpen || settingsPanelHovered)
         return;
 
-    // [TODO] EXPLAIN
-    if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) != GLFW_PRESS)
-        firstMouse = true;
-
-    // handle the first mouse movement to prevent a sudden jump
-    if (firstMouse)
-    {
-        lastX = xpos;
-        lastY = ypos;
-        firstMouse = false;
-    }
-
     // calculate the mouse offset since the last frame
     // (xpos and ypos are the current cursor coordinates in screen space)
     float xoffset = xpos - lastX;
@@ -350,11 +350,30 @@ void mouse_callback(GLFWwindow *window, double xpos, double ypos)
     lastX = xpos;
     lastY = ypos;
 
+    // only rotate the mesh if the right mouse button is pressed
+    if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS)
+    {
+        meshYaw += xoffset * meshRotationSensitivity;
+        meshPitch += -yoffset * meshRotationSensitivity;
+        return;
+    }
+
+    // only rotate the camera if the left mouse button is pressed
+    if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) != GLFW_PRESS)
+        return;
+
+    // skip camera rotation for the first frame to prevent a sudden jump or when
+    if (firstMouse)
+    {
+        firstMouse = false;
+        return;
+    }
+
     // handle mouse movement input using the Camera class function
     ourCamera.ProcessMouseMovement(xoffset, yoffset);
 }
 
-// whenever a key is pressed, this callback function executes and only 1 time, preventing continuous toggling when a key is held down (which would occur in processInput)
+// whenever a key is pressed, this callback function executes and only once, preventing continuous toggling when a key is held down (which would occur in processInput)
 void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods)
 {
     if (action == GLFW_PRESS)
@@ -563,6 +582,20 @@ void loadBDAEModel(const char *fpath)
                     currentSubmeshIndex++;
                 }
             }
+
+            // compute the mesh's center in world space for its correct rotation (instead of always rotating around the origin (0, 0, 0))
+            meshCenter = glm::vec3(0.0f);
+
+            for (int i = 0, n = vertices.size() / 8; i < n; i++)
+            {
+                meshCenter.x += vertices[i * 8 + 0];
+                meshCenter.y += vertices[i * 8 + 1];
+                meshCenter.z += vertices[i * 8 + 2];
+            }
+
+            meshCenter /= (vertices.size() / 8);
+
+            std::cout << "CENTER: " << meshCenter.x << "  " << meshCenter.y << "  " << meshCenter.z << std::endl;
 
             // search for texture names
             ptr = (char *)myFile.DataBuffer + 80 + 96;
