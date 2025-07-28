@@ -3,7 +3,7 @@
 
 #include <string.h>
 #include "access.h"
-#include "libs/io/CPackResReader.h"
+#include "libs/oac/io/CPackResReader.h"
 
 // .bdae file header structure
 struct FileHeaderData
@@ -35,11 +35,16 @@ struct File : public Access<FileHeaderData>
 {
     std::vector<std::string> StringStorage;
 
+    void *DataBuffer;
+    bool IsValid;
+    void *OffsetTable;
+    void *StringTable;
+
     int Size;
     int SizeUnRemovable;
     int SizeOffsetStringTables;
-    void **RemovableBuffers;
     uint64_t *RemovableBuffersInfo;
+    void **RemovableBuffers;
     int SizeRemovableBuffer;
     int NbRemovableBuffers;
     bool UseSeparatedAllocationForRemovableBuffers;
@@ -51,11 +56,6 @@ struct File : public Access<FileHeaderData>
     static int ExternalFileStringTableSize[2];
     static int SizeOfHeader;
     static bool ExtractStringTable;
-
-    bool IsValid;
-    void *OffsetTable;
-    void *StringTable;
-    void *DataBuffer;
 
     File() : IsValid(false), OffsetTable(NULL) {}
 

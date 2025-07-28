@@ -2,7 +2,7 @@
 #include <iomanip>
 #include <cstdint>
 #include "resFile.h"
-#include "libs/io/PackPatchReader.h"
+#include "libs/oac/io/PackPatchReader.h"
 
 int File::SizeOfHeader = 0;
 
@@ -35,7 +35,7 @@ int File::Init(IReadResFile *file)
     std::cout << "[Init] File name: " << file->getFileName() << std::endl;
     std::cout << "\n[Init] At position " << file->getPos() << ", reading header.." << std::endl;
 
-    int readSize = file->read(header, headerSize);
+    file->read(header, headerSize);
 
     std::cout << "_________________" << std::endl;
     std::cout << "\nFile Header Data\n"
@@ -457,8 +457,6 @@ int File::Init()
                         offset.ptr()->OffsetToPtr(origin - originoff);
                 }
             }
-
-            Access<Access<int>> &offset = header->offsets[2];
         }
         /* 7b. This occurs when a temporary buffer is not used. The offset table is in-place — directly in the file’s main memory buffer — no separate deletable buffer (OffsetTable == NULL), so no need to retrieve or correct anything. Simply convert relative offsets to direct pointers. */
         else
@@ -492,7 +490,7 @@ int File::Init()
     std::cout << "\nExtracted String Data\n"
               << std::endl;
 
-    for (int i = 0; i < StringStorage.size(); ++i)
+    for (int i = 0; i < (int)StringStorage.size(); ++i)
         std::cout << "[" << std::setw(2) << i + 1 << "] \"" << StringStorage[i] << "\"" << std::endl;
 
     std::cout << "_____________________\n"

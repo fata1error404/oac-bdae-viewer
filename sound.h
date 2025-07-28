@@ -4,7 +4,7 @@
 #define MINIAUDIO_IMPLEMENTATION
 #include "libs/miniaudio.h" // library for audio playback
 
-const std::filesystem::path soundPath("sound/"); // default directory with all '.wav' files
+const std::filesystem::path soundPath("data/sound/"); // default directory with all '.wav' files
 
 class Sound
 {

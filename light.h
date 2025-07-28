@@ -18,8 +18,9 @@ public:
     unsigned int texture;
 
     Light(Camera &cam)
-        : camera(cam),
-          shader("shader lightcube.vs", "shader lightcube.fs")
+        : shader("shader lightcube.vs", "shader lightcube.fs"),
+          camera(cam)
+
     {
         shader.use();
         shader.setMat4("model", glm::translate(glm::mat4(1.0f), lightPos));
