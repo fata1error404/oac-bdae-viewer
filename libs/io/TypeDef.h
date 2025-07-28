@@ -1,13 +1,12 @@
 #ifndef TYPE_DEF_H_
 #define TYPE_DEF_H_
 
-//type define without irrlicht
-
+// type define without irrlicht
 
 /////////////////////////////////////////////////
-//typedef
-typedef  unsigned char	BYTE;
-typedef  unsigned int	UINT;
+// typedef
+typedef unsigned char BYTE;
+typedef unsigned int UINT;
 /* Use correct types for x64 platforms, too */
 
 #ifdef __GNUC__
@@ -19,7 +18,7 @@ typedef unsigned long long uint64;
 typedef unsigned int uint32;
 typedef unsigned short uint16;
 typedef unsigned char uint8;
-typedef unsigned int DWORD;
+// typedef unsigned int DWORD;
 typedef unsigned char byte;
 #else
 typedef signed __int64 int64;
@@ -37,7 +36,7 @@ const static ObjGUID ObjGUID_NULL = 0;
 
 union InstanceGUID
 {
-	inline bool operator<( const InstanceGUID& p ) const
+	inline bool operator<(const InstanceGUID &p) const
 	{
 		return instanceGUID < p.instanceGUID;
 	}
@@ -53,7 +52,7 @@ union InstanceGUID
 	}
 
 	uint64 instanceGUID;
-	struct 
+	struct
 	{
 		uint16 GSID;
 		uint16 MAPID;
@@ -63,24 +62,20 @@ union InstanceGUID
 
 const static InstanceGUID InsGUID_INVALID = {0};
 
-
-
-#if defined(__amd64__)||defined(__amd64)||defined(__x86_64__)||defined(__x86_64)||defined(_M_X64)
+#if defined(__amd64__) || defined(__amd64) || defined(__x86_64__) || defined(__x86_64) || defined(_M_X64)
 typedef uint64 dword_ptr;
 #else
 typedef uint32 dword_ptr;
-#endif 
+#endif
 
-
-typedef	uint32				U32;
-typedef	uint16				U16;
-typedef	uint8				U8;
-typedef	int32				S32;
-typedef	int16				S16;
-typedef	int8				S8;
-typedef float				F32;
-//#include <string>
-
+typedef uint32 U32;
+typedef uint16 U16;
+typedef uint8 U8;
+typedef int32 S32;
+typedef int16 S16;
+typedef int8 S8;
+typedef float F32;
+// #include <string>
 
 /* Define NULL pointer value */
 /*
@@ -92,7 +87,6 @@ typedef float				F32;
 #endif
 #endif
 */
- 
 
 #ifdef __GNUC__
 
@@ -108,29 +102,25 @@ typedef float				F32;
 #define I64FMTD "%I64u"
 #define SI64FMTD "%I64d"
 #define atoll _atoi64
-#define ltoa  _ltoa
+#define ltoa _ltoa
 #endif
 
 #ifdef __GNUC__
-#	define LIKELY( _x ) \
-		__builtin_expect( ( _x ), 1 )
-#	define UNLIKELY( _x ) \
- 		__builtin_expect( ( _x ), 0 )
+#define LIKELY(_x) \
+	__builtin_expect((_x), 1)
+#define UNLIKELY(_x) \
+	__builtin_expect((_x), 0)
 #else
-#	define LIKELY( _x ) \
-		_x
-#	define UNLIKELY( _x ) \
-		_x
+#define LIKELY(_x) \
+	_x
+#define UNLIKELY(_x) \
+	_x
 #endif
 
-
-
-
-#ifndef SOCKET
-typedef uint32 SOCKET;
-#define INVALID_SOCKET  (SOCKET)(~0)
-#endif
-
+// #ifndef SOCKET
+// typedef uint32 SOCKET;
+// #define INVALID_SOCKET  (SOCKET)(~0)
+// #endif
 
 // ANSI C .h
 #include <stdlib.h>
@@ -141,8 +131,6 @@ typedef uint32 SOCKET;
 #include <fcntl.h>
 #include <limits.h>
 #include <stdarg.h>
-
-
 
 // STL .h
 #include <algorithm>
@@ -183,13 +171,13 @@ using namespace std;
 #if !LITTLE_ENDIAN
 #define _BITSWAP16(x) (((x << 8) & 0xff00) | ((x >> 8) & 0x00ff))
 
-#define _BITSWAP32(x) (((x << 24) & 0xff000000) | ((x <<  8) & 0x00ff0000) | \
-	((x >>  8) & 0x0000ff00) | ((x >> 24) & 0x000000ff))
+#define _BITSWAP32(x) (((x << 24) & 0xff000000) | ((x << 8) & 0x00ff0000) | \
+					   ((x >> 8) & 0x0000ff00) | ((x >> 24) & 0x000000ff))
 
 #define _BITSWAP64(x) (((x << 56) & 0xff00000000000000ULL) | ((x << 40) & 0x00ff000000000000ULL) | \
-	((x << 24) & 0x0000ff0000000000ULL) | ((x <<  8) & 0x000000ff00000000ULL) | \
-	((x >>  8) & 0x00000000ff000000ULL) | ((x >> 24) & 0x0000000000ff0000ULL) | \
-	((x >> 40) & 0x000000000000ff00ULL) | ((x >> 56) & 0x00000000000000ffULL))
+					   ((x << 24) & 0x0000ff0000000000ULL) | ((x << 8) & 0x000000ff00000000ULL) |  \
+					   ((x >> 8) & 0x00000000ff000000ULL) | ((x >> 24) & 0x0000000000ff0000ULL) |  \
+					   ((x >> 40) & 0x000000000000ff00ULL) | ((x >> 56) & 0x00000000000000ffULL))
 #else
 #define _BITSWAP16(x) (x)
 #define _BITSWAP32(x) (x)
@@ -198,17 +186,17 @@ using namespace std;
 
 struct FTableHeader
 {
-	uint8		FLAG[8]; 
-	uint32		nVersion;
-	uint32		nRows;
-	uint32		nCols;		
-	uint32		nOffsetIndex;
-	uint32		nOffsetFormat;
-	uint32		nOffsetEntry;
-	uint32		nEntrySize;
-	uint32		nOffsetStrTable;
-	uint32		nLengthStrTable;
+	uint8 FLAG[8];
+	uint32 nVersion;
+	uint32 nRows;
+	uint32 nCols;
+	uint32 nOffsetIndex;
+	uint32 nOffsetFormat;
+	uint32 nOffsetEntry;
+	uint32 nEntrySize;
+	uint32 nOffsetStrTable;
+	uint32 nLengthStrTable;
 };
-#define	TABLE_STR_FLAG		"FTABLE"
-#define TABLE_VERSION		 0x100000
-#endif//TYPE_COMMON_H_
+#define TABLE_STR_FLAG "FTABLE"
+#define TABLE_VERSION 0x100000
+#endif // TYPE_COMMON_H_

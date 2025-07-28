@@ -15,6 +15,7 @@
 #include "libs/stb_image.h"      // library for image loading
 #include "shader.h"              // implementation of the graphics pipeline
 #include "camera.h"              // implementation of the camera system
+#include "sound.h"               // implementation of the sound system
 #include "light.h"               // definition of the light settings and light cube
 
 #ifdef __linux__
@@ -31,7 +32,7 @@ void scroll_callback(GLFWwindow *window, double xoffset, double yoffset);
 void mouse_callback(GLFWwindow *window, double xpos, double ypos);
 void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
 void processInput(GLFWwindow *window);
-void loadBDAEModel(const char *fpath);
+void loadBDAEModel(const char *fpath, Sound &sound);
 
 // window settings
 bool isFullscreen = false;
@@ -84,7 +85,7 @@ int main()
 
     // set window icon
     int width, height, nrChannels;
-    unsigned char *data = stbi_load("app icon.png", &width, &height, &nrChannels, 0);
+    unsigned char *data = stbi_load("aux_docs/app icon.png", &width, &height, &nrChannels, 0);
     GLFWimage icon;
     icon.width = width;
     icon.height = height;
@@ -145,6 +146,8 @@ int main()
     glEnable(GL_BLEND);                                // enable blending with the scene
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); // use the opacity value of the model texture to blend it correctly, ensuring smooth transparency on the edges
 
+    Sound ourSound;
+
     Shader ourShader("shader model.vs", "shader model.fs");
 
     ourShader.use();
@@ -175,13 +178,13 @@ int main()
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        // define settings panel with fixed size and position
-        ImGui::SetNextWindowSize(ImVec2(200.0f, 270.0f), ImGuiCond_None);
+        // define settings panel with dynamic size and fixed position
+        ImGui::SetNextWindowSizeConstraints(ImVec2(200.0f, 270.0f), ImVec2(200.0f, FLT_MAX));
         ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f), ImGuiCond_None);
 
         settingsPanelHovered = ImGui::GetIO().WantCaptureMouse;
 
-        ImGui::Begin("Settings", NULL, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
+        ImGui::Begin("Settings", NULL, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove);
 
         // add a button that opens file browsing dialog
         if (ImGui::Button("Load Model"))
@@ -209,7 +212,7 @@ int main()
             if (IGFD::FileDialog::Instance()->IsOk())
             {
                 std::map<std::string, std::string> selection = IGFD::FileDialog::Instance()->GetSelection(); // returns pairs (file name, full path)
-                loadBDAEModel(selection.begin()->second.c_str());
+                loadBDAEModel(selection.begin()->second.c_str(), ourSound);
             }
 
             cfg.path = ImGuiFileDialog::Instance()->GetCurrentPath();
@@ -233,7 +236,13 @@ int main()
             ImGui::Spacing();
 
             if (alternativeTextureCount > 0)
+            {
+                ImGui::PushItemWidth(130.0f);
                 ImGui::SliderInt(" Color", &selectedTexture, 0, alternativeTextureCount);
+                ImGui::PopItemWidth();
+            }
+
+            ourSound.updateSoundUI();
         }
 
         ImGui::End();
@@ -316,8 +325,9 @@ int main()
         glfwPollEvents();        // if any events are triggered (like keyboard input or mouse movement events), updates the window state, and calls the corresponding functions (which we can register via callback methods)
     }
 
-    // terminate, clearing all previously allocated GLFW resources
+    // terminate, clearing all previously allocated resources
     glfwTerminate();
+    ma_engine_uninit(&ourSound.engine);
     return 0;
 }
 
@@ -449,7 +459,7 @@ void processInput(GLFWwindow *window)
 // BDAE File Loading
 // _________________
 
-void loadBDAEModel(const char *fpath)
+void loadBDAEModel(const char *fpath, Sound &sound)
 {
     // 1. clear GPU memory and reset viewer state
     if (VAO)
@@ -594,8 +604,6 @@ void loadBDAEModel(const char *fpath)
             }
 
             meshCenter /= (vertices.size() / 8);
-
-            std::cout << "CENTER: " << meshCenter.x << "  " << meshCenter.y << "  " << meshCenter.z << std::endl;
 
             // search for texture names
             ptr = (char *)myFile.DataBuffer + 80 + 96;
@@ -802,7 +810,7 @@ void loadBDAEModel(const char *fpath)
                         if (entryPath.extension() != ".png")
                             continue;
 
-                        // skip the file if its name doesn't exactly match the group name, and doesn’t start with the group name followed by an underscore.
+                        // skip the file if its name doesn't exactly match the group name, and doesn’t start with the group name followed by an underscore
                         if (!(entryPath.stem().string() == groupName || entryPath.stem().string().rfind(groupName + '_', 0) == 0))
                             continue;
 
@@ -837,8 +845,12 @@ void loadBDAEModel(const char *fpath)
                     std::cout << "No valid grouping name for '" << baseTextureName << "'\n";
             }
 
-            // if (isAlphaRef)
-            //     std::cout << "\nALPHAREF" << std::endl;
+            sound.searchSoundFiles(fileName);
+
+            std::cout << "\nSOUNDS: " << ((sound.sounds.size() != 0) ? sound.sounds.size() : 0) << std::endl;
+
+            for (int i = 0; i < sound.sounds.size(); i++)
+                std::cout << "[" << i + 1 << "]  " << sound.sounds[i] << std::endl;
         }
 
         free(myFile.DataBuffer);

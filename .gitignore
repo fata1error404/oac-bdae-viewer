@@ -1,6 +1,7 @@
 app
 .vscode/
 model/
+sound/
 texture/
 
 aux_docs/temp.txt
