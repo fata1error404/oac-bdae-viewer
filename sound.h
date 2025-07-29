@@ -14,7 +14,6 @@ public:
     bool soundPlaying;               // flag that controls sound play button
     unsigned int playIcon, stopIcon; // texture IDs for sound play button
     int selectedSound;               // index of the currently selected sound file path
-    std::vector<std::string> sounds; // sound file paths
 
     Sound()
     {
@@ -42,9 +41,8 @@ public:
     }
 
     //! Searches for '.wav' sound files on disk that contain model file name.
-    void searchSoundFiles(std::string fname)
+    void searchSoundFiles(std::string fname, std::vector<std::string> &sounds)
     {
-        sounds.clear();
         selectedSound = 0;
 
         std::string baseFileName = std::filesystem::path(fname).stem().string();
@@ -68,7 +66,7 @@ public:
     }
 
     //! Updates Dear ImGui sound interface each frame (sound selector and play button; shown only if a sound is detected).
-    void updateSoundUI()
+    void updateSoundUI(std::vector<std::string> &sounds)
     {
         if (!sounds.empty())
         {

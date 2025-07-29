@@ -17,7 +17,8 @@
 #include "camera.h"              // implementation of the camera system
 #include "sound.h"               // implementation of the sound system
 #include "light.h"               // definition of the light settings and light cube
-#include "parserBDAE.h"          // .bdae format parser
+#include "parserBDAE.h"          // parser for 3D models
+#include "parserTRN.h"           // parser for terrain meshes
 
 #ifdef __linux__
 #include <GLFW/glfw3.h> // library for creating windows and handling input – mouse clicks, keyboard input, or window resizes
@@ -54,6 +55,7 @@ double lastY = DEFAULT_WINDOW_HEIGHT / 2.0; // starting cursor position (y-axis)
 // viewer variables
 bool fileDialogOpen = false;       // flag that indicates whether to block all background inputs (when the file browsing dialog is open)
 bool settingsPanelHovered = false; // flag that indicated whether to block background mouse input (when interacting with the settings panel)
+bool isTerrainViewer = false;
 
 int main()
 {
@@ -113,7 +115,7 @@ int main()
 
     // configure file browsing dialog
     IGFD::FileDialogConfig cfg;
-    cfg.path = "./data/model";                                                             // default path
+    cfg.path = "";                                                                         // default path
     cfg.fileName = "";                                                                     // default file name (none)
     cfg.filePathName = "";                                                                 // default file path name (none)
     cfg.countSelectionMax = 1;                                                             // only allow to select one file
@@ -122,6 +124,15 @@ int main()
     cfg.userDatas = NULL;                                                                  // no custom user data passed to the dialog
     cfg.sidePane = NULL;                                                                   // no side panel
     cfg.sidePaneWidth = 0.0f;                                                              // side panel width (unused)
+
+    unsigned int switchIcon;
+    data = stbi_load("aux_docs/button_switch.png", &width, &height, &nrChannels, 0);
+    glGenTextures(1, &switchIcon);
+    glBindTexture(GL_TEXTURE_2D, switchIcon);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+    stbi_image_free(data);
 
     // enable depth testing to ensure correct pixel rendering order in 3D space (depth buffer prevents incorrect overlaying and redrawing of objects)
     glEnable(GL_DEPTH_TEST);
@@ -133,7 +144,9 @@ int main()
 
     Light lightSource(ourCamera);
 
-    BDAE bdaeModel(ourCamera);
+    Model bdaeModel(ourCamera);
+
+    Terrain terrainModel;
 
     // game loop
     while (!glfwWindowShouldClose(window))
@@ -163,15 +176,34 @@ int main()
         ImGui::Begin("Settings", NULL, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove);
 
         // add a button that opens file browsing dialog
-        if (ImGui::Button("Load Model"))
+        if (ImGui::Button(isTerrainViewer ? "Load Terrain (beta)" : "Load Model"))
         {
+            cfg.path = isTerrainViewer ? "./data/terrain" : "./data/model";
+
             IGFD::FileDialog::Instance()->OpenDialog(
-                "File_Browsing_Dialog", // dialog ID (used to reference this dialog instance)
-                "Load .bdae Model",     // dialog title
-                ".bdae",                // file extension filter
-                cfg                     // config
+                "File_Browsing_Dialog",                         // dialog ID (used to reference this dialog instance)
+                isTerrainViewer ? "Load Map" : "Load 3D Model", // dialog title
+                isTerrainViewer ? ".zip" : ".bdae",             // file extension filter
+                cfg                                             // config
             );
         }
+
+        ImGui::SameLine();
+
+        // define viewer mode change button
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() - 5.0f);
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0, 0, 0, 0));
+
+        if (ImGui::ImageButton("##viewer_mode_change_button", switchIcon, ImVec2(25, 25)))
+        {
+            isTerrainViewer ? terrainModel.reset() : bdaeModel.reset();
+            isTerrainViewer = !isTerrainViewer;
+            ma_sound_stop(&ourSound.sound);
+        }
+
+        ImGui::PopStyleColor(3);
 
         // define file browsing dialog with fixed size and position in the center
         ImVec2 dialogSize(currentWindowWidth * 0.7f, currentWindowHeight * 0.6f);
@@ -188,15 +220,19 @@ int main()
             if (IGFD::FileDialog::Instance()->IsOk())
             {
                 std::map<std::string, std::string> selection = IGFD::FileDialog::Instance()->GetSelection(); // returns pairs (file name, full path)
-                bdaeModel.load(selection.begin()->second.c_str(), ourSound);
+
+                if (!isTerrainViewer)
+                    bdaeModel.load(selection.begin()->second.c_str(), ourSound);
+                else
+                    terrainModel.load(selection.begin()->second.c_str(), ourSound);
             }
 
-            cfg.path = ImGuiFileDialog::Instance()->GetCurrentPath();
-            IGFD::FileDialog::Instance()->Close(); // close the dialog after handling OK or Cancel
+            cfg.path = ImGuiFileDialog::Instance()->GetCurrentPath(); // save most recent path
+            IGFD::FileDialog::Instance()->Close();                    // close the dialog after handling OK or Cancel
         }
 
         // if a model is loaded, show its stats + checkboxes
-        if (modelLoaded)
+        if (modelLoaded && !isTerrainViewer)
         {
             ImGui::Spacing();
             ImGui::TextWrapped("File:\xC2\xA0%s", bdaeModel.fileName.c_str());
@@ -218,7 +254,29 @@ int main()
                 ImGui::PopItemWidth();
             }
 
-            ourSound.updateSoundUI();
+            ourSound.updateSoundUI(bdaeModel.sounds);
+        }
+
+        if (terrainLoaded && isTerrainViewer)
+        {
+            ImGui::Spacing();
+            ImGui::TextWrapped("File:\xC2\xA0%s", terrainModel.fileName.c_str());
+            ImGui::Text("Size: %d Bytes", terrainModel.fileSize);
+            ImGui::Text("Vertices: %d", terrainModel.vertexCount);
+            ImGui::Text("Faces: %d", terrainModel.faceCount);
+            ImGui::NewLine();
+            ImGui::TextWrapped("Terrain: %d x %d tiles", terrainModel.tilesX, terrainModel.tilesZ);
+            ImGui::Text("Position: (x, y, z)");
+            ImGui::Spacing();
+
+            ImGui::PushItemWidth(180.0f);
+            ImGui::DragFloat3("##Camera Pos", &ourCamera.Position.x, 0.1f, -FLT_MAX, FLT_MAX, "%.0f");
+            ImGui::PopItemWidth();
+
+            ImGui::Text("x: min %d, max %d", (int)terrainModel.minX, (int)terrainModel.maxX);
+            ImGui::Text("z: min %d, max %d", (int)terrainModel.minZ, (int)terrainModel.maxZ);
+
+            ourSound.updateSoundUI(terrainModel.sounds);
         }
 
         ImGui::End();
@@ -232,11 +290,14 @@ int main()
         glm::mat4 view = ourCamera.GetViewMatrix();
         glm::mat4 projection = glm::perspective(glm::radians(ourCamera.Zoom), (float)currentWindowWidth / (float)currentWindowHeight, 0.1f, 1000.0f);
 
-        // render model
-        bdaeModel.draw(view, projection);
+        if (!isTerrainViewer)
+        {
+            bdaeModel.draw(view, projection); // render model
 
-        // render light cube
-        lightSource.draw(view, projection);
+            lightSource.draw(view, projection); // render light cube
+        }
+        else
+            terrainModel.draw(view, projection); // render terrain
 
         // render settings panel (and file browsing dialog, if open)
         ImGui::Render();

@@ -1,7 +1,7 @@
-#ifndef PARSERBDAE_H
-#define PARSERBDAE_H
+#ifndef PARSER_BDAE_H
+#define PARSER_BDAE_H
 
-#include "libs/oac/io/PackPatchReader.h"
+#include "PackPatchReader.h"
 #include "resFile.h"
 
 const float meshRotationSensitivity = 0.3f;
@@ -11,7 +11,7 @@ float meshYaw = 0.0f;
 bool displayBaseMesh = false; // flag that indicates base / textured mesh display mode
 bool modelLoaded = false;     // flag that indicates whether to display model info and settings
 
-class BDAE
+class Model
 {
 public:
     Shader shader;
@@ -23,9 +23,10 @@ public:
     std::vector<float> vertices;
     std::vector<std::vector<unsigned short>> indices;
     std::vector<unsigned int> textures;
+    std::vector<std::string> sounds;
     glm::vec3 meshCenter;
 
-    BDAE(Camera &cam)
+    Model(Camera &cam)
         : shader("shader model.vs", "shader model.fs"),
           camera(cam)
     {
@@ -40,37 +41,11 @@ public:
     //! Loads .bdae file from disk, performs in-memory initialization and parsing, sets up model mesh data, textures and sounds.
     void load(const char *fpath, Sound &sound)
     {
-        // 1. clear GPU memory and reset viewer state
-        if (VAO)
-        {
-            glDeleteVertexArrays(1, &VAO);
-            VAO = 0;
-        }
+        reset();
 
-        if (VBO)
-        {
-            glDeleteBuffers(1, &VBO);
-            VBO = 0;
-        }
-
-        if (!EBOs.empty())
-        {
-            glDeleteBuffers(totalSubmeshCount, EBOs.data());
-            EBOs.clear();
-        }
-
-        if (!textures.empty())
-        {
-            glDeleteTextures(textureCount + alternativeTextureCount, textures.data());
-            textures.clear();
-        }
-
-        vertices.clear();
-        indices.clear();
-        fileSize = vertexCount = faceCount = textureCount = alternativeTextureCount = selectedTexture = totalSubmeshCount = 0;
         std::vector<std::string> textureNames;
 
-        // 2. load and parse the .bdae file, building the mesh vertex and index data
+        // 1. load and parse the .bdae file, building the mesh vertex and index data
         CPackPatchReader *bdaeArchive = new CPackPatchReader(fpath, true, false);           // open outer .bdae archive file
         IReadResFile *bdaeFile = bdaeArchive->openFile("little_endian_not_quantized.bdae"); // open inner .bdae file
 
@@ -424,12 +399,12 @@ public:
                         std::cout << "No valid grouping name for '" << baseTextureName << "'\n";
                 }
 
-                sound.searchSoundFiles(fileName);
+                sound.searchSoundFiles(fileName, sounds);
 
-                std::cout << "\nSOUNDS: " << ((sound.sounds.size() != 0) ? sound.sounds.size() : 0) << std::endl;
+                std::cout << "\nSOUNDS: " << ((sounds.size() != 0) ? sounds.size() : 0) << std::endl;
 
-                for (int i = 0; i < (int)sound.sounds.size(); i++)
-                    std::cout << "[" << i + 1 << "]  " << sound.sounds[i] << std::endl;
+                for (int i = 0; i < (int)sounds.size(); i++)
+                    std::cout << "[" << i + 1 << "]  " << sounds[i] << std::endl;
             }
 
             free(myFile.DataBuffer);
@@ -441,7 +416,7 @@ public:
         delete bdaeFile;
         delete bdaeArchive;
 
-        // 3. setup buffers
+        // 2. setup buffers
         EBOs.resize(totalSubmeshCount);
         glGenVertexArrays(1, &VAO);                   // generate a Vertex Attribute Object to store vertex attribute configurations
         glGenBuffers(1, &VBO);                        // generate a Vertex Buffer Object to store vertex data
@@ -465,7 +440,7 @@ public:
             glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices[i].size() * sizeof(unsigned short), indices[i].data(), GL_STATIC_DRAW);
         }
 
-        // 4. load texture(s)
+        // 3. load texture(s)
         textures.resize(textureNames.size());
         glGenTextures(textureNames.size(), textures.data()); // generate and store texture ID(s)
 
@@ -497,6 +472,42 @@ public:
         }
 
         modelLoaded = true;
+    }
+
+    //! Clears GPU memory and resets viewer state.
+    void reset()
+    {
+        if (VAO)
+        {
+            glDeleteVertexArrays(1, &VAO);
+            VAO = 0;
+        }
+
+        if (VBO)
+        {
+            glDeleteBuffers(1, &VBO);
+            VBO = 0;
+        }
+
+        if (!EBOs.empty())
+        {
+            glDeleteBuffers(totalSubmeshCount, EBOs.data());
+            EBOs.clear();
+        }
+
+        if (!textures.empty())
+        {
+            glDeleteTextures(textureCount + alternativeTextureCount, textures.data());
+            textures.clear();
+        }
+
+        vertices.clear();
+        indices.clear();
+        sounds.clear();
+
+        fileSize = vertexCount = faceCount = textureCount = alternativeTextureCount = selectedTexture = totalSubmeshCount = 0;
+
+        modelLoaded = false;
     }
 
     //! Renders .bdae model.
