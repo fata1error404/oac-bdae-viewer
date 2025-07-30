@@ -4,7 +4,6 @@ LIB_HEADERS = -Ilibs/oac \
 			  -Ilibs/oac/base \
     		  -Ilibs/oac/framework \
 			  -Ilibs/oac/io \
-			  -Ilibs/oac/navmesh \
 			  -Ilibs/oac/physics
 
 LIB_SOURCES = libs/glad/glad.c \
@@ -16,11 +15,7 @@ LIB_SOURCES = libs/glad/glad.c \
               libs/imgui/imgui_impl_opengl3.cpp \
 			  libs/imgui/ImGuiFileDialog.cpp \
 			  libs/oac/base/Mutex.cpp \
-			  libs/oac/framework/OS.cpp \
-# 			  libs/oac/navmesh/DetourCommon.cpp \
-# 			  libs/oac/navmesh/DetourNavMesh.cpp \
-# 			  libs/oac/navmesh/DetourNavMeshBuilder.cpp \
-# 			  libs/oac/navmesh/DetourNode.cpp \
+			  libs/oac/framework/OS.cpp
 
 OS = $(shell uname -s)
 

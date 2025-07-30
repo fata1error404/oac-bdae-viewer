@@ -55,7 +55,7 @@ double lastY = DEFAULT_WINDOW_HEIGHT / 2.0; // starting cursor position (y-axis)
 // viewer variables
 bool fileDialogOpen = false;       // flag that indicates whether to block all background inputs (when the file browsing dialog is open)
 bool settingsPanelHovered = false; // flag that indicated whether to block background mouse input (when interacting with the settings panel)
-bool isTerrainViewer = false;
+bool isTerrainViewer = true;
 
 int main()
 {
@@ -183,7 +183,7 @@ int main()
             IGFD::FileDialog::Instance()->OpenDialog(
                 "File_Browsing_Dialog",                         // dialog ID (used to reference this dialog instance)
                 isTerrainViewer ? "Load Map" : "Load 3D Model", // dialog title
-                isTerrainViewer ? ".zip" : ".bdae",             // file extension filter
+                isTerrainViewer ? ".trn" : ".bdae",             // file extension filter
                 cfg                                             // config
             );
         }

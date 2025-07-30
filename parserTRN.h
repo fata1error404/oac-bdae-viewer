@@ -11,6 +11,8 @@
 #include "CZipResReader.h"
 #include "AABB.h"
 #include "VEC3.h"
+#include "Quaternion.h"
+#include "parserITM.h"
 
 static unsigned char s_loadBuffer[DEFAULT_LOAD_BUFFER_SIZE];
 
@@ -18,13 +20,13 @@ bool terrainLoaded = false;
 
 struct TRNFileHeader
 {
-    char signature[4];    // 4 bytes  signature
-    unsigned int version; // 4 bytes  format version
+    char Signature[4];    // 4 bytes  signature
+    unsigned int Version; // 4 bytes  format version
     int GridX;            // 4 bytes  x axis grid position
     int GridY;            // 4 bytes  x axis grid position
-    unsigned int flag;    // 4 bytes  explain
-    short waterTexID;     // 2 bytes  explain
-    short liquidType;     // 2 bytes  explain
+    unsigned int Flag;    // 4 bytes  explain
+    short WaterTexID;     // 2 bytes  explain
+    short LiquidType;     // 2 bytes  explain
 };
 
 struct TileChunk
@@ -106,7 +108,7 @@ public:
             }
         }
 
-        /* 2.4. Parse chunk section. Retrieve:
+        /* 2.4. Parse height map section. Retrieve:
                 – height map */
 
         int minHeight = 50000;
@@ -133,6 +135,31 @@ public:
 
         tileTerrain->BBox.MinEdge.Y = minHeight * 0.01f;
         tileTerrain->BBox.MaxEdge.Y = maxHeight * 0.01f;
+
+        /* 2.5. Parse string data section. Retrieve:
+                – number of textures
+                – texture file names
+        */
+
+        // [TODO] annotate, save as a Class variable
+        int textureCount;
+        int stringDataOffset = chunkOffset + 7 * ((UnitsInTile + 1) * (UnitsInTile + 1)) + 1;
+        memcpy(&textureCount, buffer + stringDataOffset, sizeof(int));
+
+        // std::cout << "\nTEXTURES: " << textureCount << std::endl;
+
+        int sizeOfName[textureCount];
+        int prevPosition = 0;
+
+        for (int i = 0; i < textureCount; i++)
+        {
+            memcpy(&sizeOfName[i], buffer + stringDataOffset + 4 + i * 4, sizeof(int));
+            sizeOfName[i] -= prevPosition;
+
+            std::string name(reinterpret_cast<char *>(buffer + stringDataOffset + 4 + 4 * textureCount + prevPosition), sizeOfName[i]);
+            // std::cout << name << std::endl;
+            prevPosition += sizeOfName[i];
+        }
 
         if (buffer != s_loadBuffer)
             delete buffer;
@@ -182,6 +209,8 @@ public:
 
         CZipResReader *terrainArchive = new CZipResReader(fpath, true, false);
 
+        CZipResReader *itemsArchive = new CZipResReader(std::string(fpath).replace(std::strlen(fpath) - 4, 4, ".itm").c_str(), true, false);
+
         for (int i = 0, n = terrainArchive->getFileCount(); i < n; i++)
         {
             IReadResFile *trnFile = terrainArchive->openFile(i); // open i-th .trn file inside the archive and return memory-read file object with the decompressed content
@@ -190,6 +219,7 @@ public:
             {
                 int tileX, tileZ;                                                        // variables that will be assigned tile's position on the grid
                 TileTerrain *tile = TileTerrain::loadTileTerrain(trnFile, tileX, tileZ); // .trn: load tile's terrain mesh data
+                loadTileEntities(itemsArchive, tileX, tileZ, tile);
 
                 if (tile)
                 {
@@ -209,6 +239,7 @@ public:
         }
 
         delete terrainArchive;
+        delete itemsArchive;
 
         /* 2. initialize Class variables inside the Terrain object
                 – terrain borders
@@ -351,7 +382,7 @@ public:
         terrainLoaded = false;
     }
 
-    //! Renders terrain.
+    //! Renders terrain mesh.
     void draw(glm::mat4 view, glm::mat4 projection)
     {
         if (terrainLoaded)
