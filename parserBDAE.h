@@ -38,7 +38,7 @@ public:
         shader.setFloat("specularStrength", specularStrength);
     }
 
-    //! Loads .bdae file from disk, performs in-memory initialization and parsing, sets up model mesh data, textures and sounds.
+    //! For 3D Model Viewer. Loads .bdae file from disk, performs in-memory initialization and parsing, sets up model mesh data, textures and sounds.
     void load(const char *fpath, Sound &sound)
     {
         reset();
@@ -472,6 +472,117 @@ public:
         }
 
         modelLoaded = true;
+    }
+
+    //! For Terrain Viewer. Loads .bdae file from disk, performs in-memory initialization and parsing, sets up model mesh data and textures (does not search for associated textures and sounds). [TODO] load textures
+    void load(const char *fpath)
+    {
+        reset();
+
+        CPackPatchReader *bdaeArchive = new CPackPatchReader((std::string("model/unsorted/") + (fpath + 6)).c_str(), true, false);
+        IReadResFile *bdaeFile = bdaeArchive->openFile("little_endian_not_quantized.bdae");
+
+        if (bdaeFile)
+        {
+            File myFile;
+            int result = myFile.Init(bdaeFile);
+
+            if (result != 1)
+            {
+                int meshCount, meshInfoOffset;
+                char *ptr = (char *)myFile.DataBuffer + 80 + 120;
+                memcpy(&meshCount, ptr, sizeof(int));
+                memcpy(&meshInfoOffset, ptr + 4, sizeof(int));
+
+                int meshVertexCount[meshCount], submeshCount[meshCount], meshMetadataOffset[meshCount];
+
+                for (int i = 0; i < meshCount; i++)
+                {
+                    memcpy(&meshMetadataOffset[i], ptr + 4 + meshInfoOffset + 20 + i * 24, sizeof(int));
+                    memcpy(&meshVertexCount[i], ptr + 4 + meshInfoOffset + 20 + i * 24 + meshMetadataOffset[i] + 4, sizeof(int));
+                    memcpy(&submeshCount[i], ptr + 4 + meshInfoOffset + 20 + i * 24 + meshMetadataOffset[i] + 12, sizeof(int));
+                    totalSubmeshCount += submeshCount[i];
+                }
+
+                indices.resize(totalSubmeshCount);
+                int currentSubmeshIndex = 0;
+
+                for (int i = 0; i < meshCount; i++)
+                {
+                    char *meshVertexDataPtr = (char *)myFile.RemovableBuffers[i + currentSubmeshIndex] + 4;
+                    int meshVertexDataSize = myFile.RemovableBuffersInfo[(i + currentSubmeshIndex) * 2] - 4;
+                    int bytesPerVertex = meshVertexDataSize / meshVertexCount[i];
+
+                    for (int j = 0; j < meshVertexCount[i]; j++)
+                    {
+                        float vertex[8];
+                        memcpy(vertex, meshVertexDataPtr + j * bytesPerVertex, sizeof(vertex));
+
+                        vertices.push_back(vertex[0]);
+                        vertices.push_back(vertex[1]);
+                        vertices.push_back(vertex[2]);
+
+                        vertices.push_back(vertex[3]);
+                        vertices.push_back(vertex[4]);
+                        vertices.push_back(vertex[5]);
+
+                        vertices.push_back(vertex[6]);
+                        vertices.push_back(vertex[7]);
+                    }
+
+                    for (int k = 0; k < submeshCount[i]; k++)
+                    {
+                        char *submeshIndexDataPtr = (char *)myFile.RemovableBuffers[i + currentSubmeshIndex + 1] + 4;
+                        int submeshIndexDataSize = myFile.RemovableBuffersInfo[(i + currentSubmeshIndex) * 2 + 2] - 4;
+                        int submeshTriangleCount = submeshIndexDataSize / (3 * sizeof(unsigned short));
+
+                        for (int l = 0; l < submeshTriangleCount; l++)
+                        {
+                            unsigned short triangle[3];
+                            memcpy(triangle, submeshIndexDataPtr + l * sizeof(triangle), sizeof(triangle));
+
+                            indices[currentSubmeshIndex].push_back(triangle[0]);
+                            indices[currentSubmeshIndex].push_back(triangle[1]);
+                            indices[currentSubmeshIndex].push_back(triangle[2]);
+                            faceCount++;
+                        }
+
+                        currentSubmeshIndex++;
+                    }
+                }
+            }
+
+            free(myFile.DataBuffer);
+            delete[] static_cast<char *>(myFile.RemovableBuffers[0]);
+            delete[] myFile.RemovableBuffers;
+            delete[] myFile.RemovableBuffersInfo;
+        }
+
+        delete bdaeFile;
+        delete bdaeArchive;
+
+        EBOs.resize(totalSubmeshCount);
+        glGenVertexArrays(1, &VAO);
+        glGenBuffers(1, &VBO);
+        glGenBuffers(totalSubmeshCount, EBOs.data());
+
+        glBindVertexArray(VAO);
+
+        glBindBuffer(GL_ARRAY_BUFFER, VBO);
+        glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_STATIC_DRAW);
+
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)0);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(3 * sizeof(float)));
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(6 * sizeof(float)));
+        glEnableVertexAttribArray(2);
+
+        for (int i = 0; i < totalSubmeshCount; i++)
+        {
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBOs[i]);
+            glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices[i].size() * sizeof(unsigned short), indices[i].data(), GL_STATIC_DRAW);
+        }
     }
 
     //! Clears GPU memory and resets viewer state.

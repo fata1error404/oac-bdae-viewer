@@ -13,5 +13,5 @@ void main()
     else if (renderMode == 3)
         FragColor = vec4(1.0, 0.0, 0.0, 1.0);
     else if (renderMode == 4)
-        FragColor = vec4(0.65f, 0.50f, 0.35f, 1.0f);
+        FragColor = vec4(0.73f, 0.58f, 0.40f, 1.0f);
 }

@@ -3,8 +3,7 @@ TARGET = app
 LIB_HEADERS = -Ilibs/oac \
 			  -Ilibs/oac/base \
     		  -Ilibs/oac/framework \
-			  -Ilibs/oac/io \
-			  -Ilibs/oac/physics
+			  -Ilibs/oac/io
 
 LIB_SOURCES = libs/glad/glad.c \
 			  libs/imgui/imgui.cpp \

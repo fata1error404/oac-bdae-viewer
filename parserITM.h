@@ -1,8 +1,6 @@
 #ifndef PARSER_ITM_H
 #define PARSER_ITM_H
 
-class TileTerrain; // forward declaration to use this class in function signatures
-
 enum ENTITY_TYPE
 {
   ENTITY,          //= 0x01 << 0,
@@ -28,87 +26,45 @@ enum ENTITY_TYPE
   ENTITY_ALL = 0xFFFFFFFF
 };
 
-struct ItemFileHeader
+// 24 bytes
+struct ITMFileHeader
 {
-  char Signature[4];
-  unsigned int Version;
-  int BaseX;
-  int BaseZ;
-  int EntityCount;
-  int FileCount;
+  char signature[4];    // 4 bytes  file signature – 'AITM' for .itm file
+  unsigned int version; // 4 bytes  format version
+  int gridX;            // 4 bytes  X-axis grid position
+  int gridZ;            // 4 bytes  Z-axis grid position
+  int entityCount;      // 4 bytes  number of entities on a tile (entities may be repeated and have the same model file)
+  int fileCount;        // 4 bytes  number of .bdae file names stored in the string data section
 };
 
+// 64 bytes, repeated entityCount times
 struct EntityInfo
 {
-  unsigned int Type;
-  unsigned int ID;
-  unsigned int ParentID;
-
-  int FileNameIdx;
-
-  VEC3 RelativePos;
-  Quaternion Rotation;
-  VEC3 Scale;
-
-  int unknown1;
-  int unknown2;
+  unsigned int type;     // 4 bytes  entity type
+  unsigned int ID;       // 4 bytes  number in the entity data section
+  unsigned int parentID; // 4 bytes  parent model reference (if true, used for memory optimization (?))
+  int fileNameIdx;       // 4 bytes  index of .bdae file name in the string data section
+  VEC3 relativePos;      // 12 bytes position relative to the tile origin
+  Quaternion rotation;   // 16 bytes orientation in 3D space; quaternion avoids gimbal lock and enables smooth interpolation
+  VEC3 scale;            // 12 bytes scaling factor along the X, Y, and Z axes
+  int unknown1;          // 4 bytes  (?)
+  int unknown2;          // 4 bytes  (?)
 };
 
-//! Loads physics geometry for a single base entity.
-inline void loadEntity(const char *fileName, const EntityInfo &entityInfo, unsigned int id, TileTerrain *tile, const VEC3 &tileOff)
-{
-  switch (entityInfo.Type)
-  {
-  case ENTITY_3D:
-  case ENTITY_HOUSE:
-  case ENTITY_EFFECT:
-  {
-    // CPhysicsGeom *physicsGeom = NULL;
+class TileTerrain; // forward declaration
 
-    // // load house entity from the physics archive into the PhysicsGeom object (?)
-    // CPhysics::LoadModelPhysics(fileName, physicsGeom, entityInfo.Type == ENTITY_HOUSE);
+inline void loadEntity(CZipResReader *physicsArchive, const char *fname, const EntityInfo &entityInfo, TileTerrain *tile, const VEC3 &tileOff);
 
-    // if (physicsGeom)
-    // {
-    //   // build a model matrix that transforms the entity from local to world space coordinates
-    //   MTX4 absTransform;
-    //   entityInfo.Rotation.getMatrix(absTransform);
-
-    //   if (entityInfo.Scale != VEC3(1.f, 1.f, 1.f))
-    //     absTransform.postScale(entityInfo.Scale);
-
-    //   absTransform.setTranslation(entityInfo.RelativePos + tileOff);
-
-    //   physicsGeom->SetSerilParentTransform(absTransform); // apply local2world transformation to entity's geometry and recursively to all connected parts of the parent game object, also updating its bounding box
-
-    //   tile->m_BBox.addInternalBox(physicsGeom->m_groupAABB); // adjust tile's bounding box to include entity's geometry
-    //   tile->m_pGeomList.push_back(physicsGeom);              // add new physics geometry to TileTerrain object
-
-    //   // CPhysics::instance()->RegisterGeom(physicsGeom, &(tile->m_pGeomList));
-    // }
-
-    // Bdae::LoadModelTexture(fileName);
-
-    break;
-  }
-
-  default:
-    break;
-  }
-}
-
-//! Processes a single .itm file, retrieving the tile's game object resource names, and loading all physics for base entities for each of them
-inline void loadTileEntities(CZipResReader *archive, int gridX, int gridZ, TileTerrain *tile)
+//! Processes a single .itm file, retrieving the tile's game object resource names, and loading all physics for base entities for each of them.
+inline void loadTileEntities(CZipResReader *itemsArchive, CZipResReader *physicsArchive, int gridX, int gridZ, TileTerrain *tile)
 {
   // 2.7. Load .itm file into memory.
   char tmpName[256];
   sprintf(tmpName, "items/%04d_%04d.itm", gridX, gridZ); // path inside the .itm archive
-  IReadResFile *itmFile = archive->openFile(tmpName);
+  IReadResFile *itmFile = itemsArchive->openFile(tmpName);
 
   if (!itmFile)
     return;
-
-  std::cout << "\nTile (" << gridX << ", " << gridZ << "): " << tmpName << std::endl;
 
   itmFile->seek(0);
   int fileSize = (int)itmFile->getSize();
@@ -125,29 +81,73 @@ inline void loadTileEntities(CZipResReader *archive, int gridX, int gridZ, TileT
         From namelist section:
           – names of game object resource files */
 
-  ItemFileHeader *header = (ItemFileHeader *)buffer;
-  unsigned int loadingOffset = sizeof(ItemFileHeader);
-  EntityInfo *pInfo = (EntityInfo *)(buffer + loadingOffset);
-  int *pNamelist = (int *)(buffer + loadingOffset + sizeof(EntityInfo) * header->EntityCount + 4);
-
-  unsigned int loadingId = 0;
+  ITMFileHeader *header = (ITMFileHeader *)buffer;
+  EntityInfo *entityData = (EntityInfo *)(buffer + sizeof(ITMFileHeader));
+  int *stringData = (int *)(buffer + sizeof(ITMFileHeader) + sizeof(EntityInfo) * header->entityCount + 4);
 
   /* 2.9. Load physics for every game object in the tile.
           For every base entity within a game object, execution sequence:
           loadEntity() → LoadModelPhysics() → .. */
 
   // loop through each game object
-  for (int i = 0; i < header->FileCount; i++)
+  for (int i = 0; i < header->fileCount; i++)
   {
-    const char *fileName = (const char *)(pNamelist + *(pNamelist - 1)) + ((i > 0) ? pNamelist[i - 1] : 0); // retrieve the corresponding resource file name
-    std::cout << "Object name: " << fileName << std::endl;
+    const char *fileName = (const char *)(stringData + *(stringData - 1)) + ((i > 0) ? stringData[i - 1] : 0); // retrieve the corresponding resource file name
 
-    // loop through each entity, filter those that are part of the i - th game object by index, and load them for (int e = 0; e < header->EntityCount; ++e)
-    for (int e = 0; e < header->EntityCount; ++e)
+    // loop through each entity, filter those that are part of the i-th game object by index, and load them
+    for (int j = 0; j < header->entityCount; j++)
     {
-      if (pInfo[e].FileNameIdx == i)
-        loadEntity(fileName, pInfo[e], loadingId++, tile, VEC3(64.0f * header->BaseX, 0, 64.0f * header->BaseZ)); // load physics for an entity
+      if (entityData[j].fileNameIdx == i)
+        loadEntity(physicsArchive, fileName, entityData[j], tile, VEC3(64.0f * header->gridX, 0, 64.0f * header->gridZ)); // load physics for an entity
     }
+  }
+}
+
+//! Loads physics geometry for a single base entity.
+inline void loadEntity(CZipResReader *physicsArchive, const char *fname, const EntityInfo &entityInfo, TileTerrain *tile, const VEC3 &tileOff)
+{
+  switch (entityInfo.type)
+  {
+  case ENTITY_3D:
+  case ENTITY_HOUSE:
+  case ENTITY_EFFECT:
+  {
+    // load house entity from the physics archive into the PhysicsGeom object (?)
+    Physics *physicsGeom = Physics::load(physicsArchive, fname, entityInfo.type == ENTITY_HOUSE); // save into physicsGeom
+
+    if (physicsGeom)
+    {
+      // build a model matrix that transforms the entity from local to world space coordinates
+      MTX4 absTransform;
+      entityInfo.rotation.getMatrix(absTransform);
+
+      if (entityInfo.scale != VEC3(1.f, 1.f, 1.f))
+        absTransform.postScale(entityInfo.scale);
+
+      absTransform.setTranslation(entityInfo.relativePos + tileOff);
+
+      physicsGeom->SetSerilParentTransform(absTransform); // apply local2world transformation to entity's geometry and recursively to all connected parts of the parent game object, also updating its bounding box
+
+      tile->BBox.addInternalBox(physicsGeom->m_groupAABB); // adjust tile's bounding box to include entity's geometry
+      tile->physicsGeometry.push_back(physicsGeom);        // add a new physics geometry to TileTerrain object
+
+      // [TODO] implement geometry
+      // CPhysics::instance()->RegisterGeom(physicsGeom, &(tile->m_pGeomList));
+    }
+
+    // [TODO load .bdae models]
+    // Camera camera;
+    // Model model(camera);
+    // model.loadTerrainEntity(fname);
+
+    // tile->models.push_back(&model);
+
+    break;
+  }
+
+  default:
+    std::cout << "[Warning] Unhandled entity type: " << entityInfo.type << std::endl;
+    break;
   }
 }
 

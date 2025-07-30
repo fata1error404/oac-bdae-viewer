@@ -22,8 +22,8 @@ struct TRNFileHeader
 {
     char Signature[4];    // 4 bytes  signature
     unsigned int Version; // 4 bytes  format version
-    int GridX;            // 4 bytes  x-axis grid position
-    int GridY;            // 4 bytes  y-axis grid position
+    int GridX;            // 4 bytes  x axis grid position
+    int GridY;            // 4 bytes  x axis grid position
     unsigned int Flag;    // 4 bytes  explain
     short WaterTexID;     // 2 bytes  explain
     short LiquidType;     // 2 bytes  explain
@@ -48,7 +48,6 @@ public:
     float Y[UnitsInTile + 1][UnitsInTile + 1]; // tile's height map (unscaled)
     AABB BBox;                                 // tile's bounding box
     std::vector<Physics *> physicsGeometry;
-    std::vector<Model *> models;
 
     TileChunk chunks[UnitsInTile];
 
@@ -195,7 +194,6 @@ public:
     float minX, minZ, maxX, maxZ;                  // terrain borders in world space coordinates
     int tileMinX, tileMinZ, tileMaxX, tileMaxZ;    // terrain borders in tile numbers (indices)
     int tilesX, tilesZ;                            // terrain size in tiles
-    int fillCount;
 
     Terrain()
         : shader("shader terrain.vs", "shader terrain.fs"),
@@ -345,7 +343,7 @@ public:
         glEnableVertexAttribArray(0);
 
         // ENTITIES
-        physicsVertices = getEntitiesVertices(fillCount);
+        physicsVertices = getEntitiesVertices();
         std::cout << physicsVertices.size() / 3 << " vertices" << std::endl;
 
         glGenVertexArrays(1, &phyVAO);
@@ -417,128 +415,240 @@ public:
         terrainLoaded = false;
     }
 
-    //! Returns a single vector partitioned into [0…fillVerts) = triangles, [fillVerts…end) = lines.
-    std::vector<float> getEntitiesVertices(int &outFillVertexCount)
+    //! Returns a vector of floats containing the physics mesh vertex data in world space coordinates (structured as vertex pairs for line rendering, which matches the wireframe format used in Glitch Engine).
+    std::vector<float> getEntitiesVertices()
     {
         std::vector<float> allVertices;
-        // first, accumulate *only* triangles
+
+        // loop through each tile in the terrain
         for (int i = 0; i < tilesX; i++)
+        {
             for (int j = 0; j < tilesZ; j++)
             {
                 if (!tiles[i][j] || tiles[i][j]->physicsGeometry.empty())
                     continue;
-                for (auto *geom : tiles[i][j]->physicsGeometry)
+
+                // std::cout << "tile [" << i << "][" << j << "] has " << tiles[i][j]->physicsGeometry.size() << " models" << std::endl;
+
+                // loop through each entity in a tile
+                for (int k = 0, geomNum = tiles[i][j]->physicsGeometry.size(); k < geomNum; k++)
                 {
+                    Physics *geom = tiles[i][j]->physicsGeometry[k];
                     int type = geom->m_geomType;
-                    // --- BOX: emit 12 tris (6 faces × 2) ---
+
+                    /* handle one of the supported physics geometries:
+                        – box
+                        – cylinder
+                        – custom mesh */
+
                     if (type == PHYSICS_GEOM_TYPE_BOX)
                     {
+                        /* define a cube: 8 vertices and 12 edges
+
+                                v6---------v4
+                          top  /|          /|    Y Z
+                              / |         / |    |/
+                            v0--|-------v2  |    • ── X
+                            |  v7-------|--v5
+                            | /         | /
+                            v1----------v3
+                                bottom
+
+                        */
+
                         VEC3 &h = geom->m_halfSize;
-                        VEC3 v[8] = {
-                            {-h.X, +h.Y, -h.Z}, {+h.X, +h.Y, -h.Z}, {+h.X, -h.Y, -h.Z}, {-h.X, -h.Y, -h.Z}, {-h.X, +h.Y, +h.Z}, {+h.X, +h.Y, +h.Z}, {+h.X, -h.Y, +h.Z}, {-h.X, -h.Y, +h.Z}};
-                        for (auto &vv : v)
-                            geom->m_absTransform.transformVect(vv);
-                        // correct faces: front, back, left, right, top, bottom
-                        int F[6][4] = {
-                            {0, 1, 2, 3}, {5, 4, 7, 6}, {0, 3, 7, 4}, {1, 5, 6, 2}, {0, 4, 5, 1}, {3, 2, 6, 7}};
-                        for (int f = 0; f < 6; ++f)
+                        VEC3 vertex[8];
+
+                        vertex[0] = VEC3(-h.X, +h.Y, -h.Z);
+                        vertex[1] = VEC3(-h.X, -h.Y, -h.Z);
+                        vertex[2] = VEC3(+h.X, +h.Y, -h.Z);
+                        vertex[3] = VEC3(+h.X, -h.Y, -h.Z);
+                        vertex[4] = VEC3(+h.X, +h.Y, +h.Z);
+                        vertex[5] = VEC3(+h.X, -h.Y, +h.Z);
+                        vertex[6] = VEC3(-h.X, +h.Y, +h.Z);
+                        vertex[7] = VEC3(-h.X, -h.Y, +h.Z);
+
+                        int edgePairs[12][2] = {
+                            {1, 3},
+                            {3, 5},
+                            {5, 7},
+                            {7, 1},
+                            {0, 2},
+                            {2, 4},
+                            {4, 6},
+                            {6, 0},
+                            {0, 1},
+                            {2, 3},
+                            {4, 5},
+                            {6, 7},
+                        };
+
+                        // loop through each vertex
+                        for (int v = 0; v < 8; v++)
+                            geom->m_absTransform.transformVect(vertex[v]); // local2world space transformation
+
+                        // loop through each edge
+                        for (int e = 0; e < 12; e++)
                         {
-                            int a = F[f][0], b = F[f][1], c = F[f][2], d = F[f][3];
-                            // tri1 (a,b,c), tri2 (a,c,d)
-                            allVertices.insert(allVertices.end(), {v[a].X, v[a].Y, v[a].Z, v[b].X, v[b].Y, v[b].Z, v[c].X, v[c].Y, v[c].Z,
-                                                                   v[a].X, v[a].Y, v[a].Z, v[c].X, v[c].Y, v[c].Z, v[d].X, v[d].Y, v[d].Z});
+                            int a = edgePairs[e][0];
+                            int b = edgePairs[e][1];
+
+                            // single cube edge
+                            allVertices.push_back(vertex[a].X);
+                            allVertices.push_back(vertex[a].Y);
+                            allVertices.push_back(vertex[a].Z);
+                            allVertices.push_back(vertex[b].X);
+                            allVertices.push_back(vertex[b].Y);
+                            allVertices.push_back(vertex[b].Z);
                         }
                     }
-                    // --- CYLINDER (unchanged) ---
                     else if (type == PHYSICS_GEOM_TYPE_CYLINDER)
-                    { /* ... exactly as before, emitting triangles ... */
-                    }
+                    {
+                        /* define a cylinder: 32 vertices and 48 edges
 
-                    // --- MESH: emit each face as one triangle ---
+                            bottom          top
+                               • ─────────── •
+                             /   \         /   \     • ── Y
+                            •     •       •     •    |\
+                            │     │       │     │    X Z
+                            •     •       •     •
+                             \   /         \   /
+                               • ─────────── •
+
+                        */
+
+                        int CUT_NUM = 16;                       // number of radial segments; controls smoothness
+                        float angle_step = 2.0f * PI / CUT_NUM; // angle increment between cylinder segments (in radians)
+                        float radius = geom->m_halfSize.X;
+                        float height = geom->m_halfSize.Y;
+
+                        // loop through each segment
+                        for (int s = 0; s < CUT_NUM; s++)
+                        {
+                            // calculate this and next vertices in the ring
+                            float angle = s * angle_step;
+                            float x = radius * cosf(angle), z = radius * sinf(angle);
+                            VEC3 bottom(x, -height, z), top(x, height, z); // points on bottom and top rings
+                            geom->m_absTransform.transformVect(bottom);    // local2world space transformation
+                            geom->m_absTransform.transformVect(top);
+
+                            float next_angle = (s + 1) * angle_step;
+                            float nx = radius * cosf(next_angle), nz = radius * sinf(next_angle);
+                            VEC3 next_bottom(nx, -height, nz), next_top(nx, height, nz);
+                            geom->m_absTransform.transformVect(next_bottom);
+                            geom->m_absTransform.transformVect(next_top);
+
+                            // single bottom ring edge
+                            allVertices.push_back(bottom.X);
+                            allVertices.push_back(bottom.Y);
+                            allVertices.push_back(bottom.Z);
+                            allVertices.push_back(next_bottom.X);
+                            allVertices.push_back(next_bottom.Y);
+                            allVertices.push_back(next_bottom.Z);
+
+                            // single top ring edge
+                            allVertices.push_back(top.X);
+                            allVertices.push_back(top.Y);
+                            allVertices.push_back(top.Z);
+                            allVertices.push_back(next_top.X);
+                            allVertices.push_back(next_top.Y);
+                            allVertices.push_back(next_top.Z);
+
+                            // single vertical side edge
+                            allVertices.push_back(bottom.X);
+                            allVertices.push_back(bottom.Y);
+                            allVertices.push_back(bottom.Z);
+                            allVertices.push_back(top.X);
+                            allVertices.push_back(top.Y);
+                            allVertices.push_back(top.Z);
+                        }
+                    }
                     else if (type == PHYSICS_GEOM_TYPE_MESH)
                     {
-                        auto *m = geom->m_refMesh;
-                        if (!m)
+                        PhysicsRefMesh *meshRef = tiles[i][j]->physicsGeometry[k]->m_refMesh; // cast from CPhysicsGeom to CPhysicsMesh class to access mesh reference
+
+                        if (!meshRef)
                             continue;
-                        const float RENDER_H_OFF = 0.10f;
-                        int F = m->GetNbFace();
-                        auto face = m->GetFacePointer();
-                        auto vert = m->GetVertexPointer();
-                        for (int f = 0; f < F; ++f)
+
+                        // // --- DEBUG OUTPUT ---
+                        // if (meshRef)
+                        // {
+                        //     if (meshRef)
+                        //     {
+                        //         std::cout << "\n=== RENDERING DEBUG ===\n";
+
+                        //         std::cout << "--- RefMesh ---\n";
+                        //         std::cout << "  m_nbVertex: " << meshRef->m_nbVertex << "\n";
+                        //         std::cout << "  m_nbFaces:  " << meshRef->m_nbFaces << "\n";
+
+                        //         std::cout << "  First 5 vertices:\n";
+                        //         for (int i = 0; i < std::min(meshRef->m_nbVertex, 5); ++i)
+                        //         {
+                        //             float *v = meshRef->m_vertex + i * 3;
+                        //             std::cout << "    [" << i << "]: ("
+                        //                       << v[0] << ", "
+                        //                       << v[1] << ", "
+                        //                       << v[2] << ")\n";
+                        //         }
+
+                        //         std::cout << "===========================\n";
+                        //     }
+                        // }
+                        // else
+                        // {
+                        //     std::cout << "m_refMesh is null!\n";
+                        // }
+
+                        float RENDER_H_OFF = 0.10f;                             // vertical offset for rendering
+                        int nbFaces = meshRef->GetNbFace();                     // number of faces
+                        const unsigned short *face = meshRef->GetFacePointer(); // face vertex indices (3 vertices per face, forming a triangle)
+                        const float *vertex = meshRef->GetVertexPointer();      // vertex data
+
+                        // loop through each face
+                        for (int f = 0; f < nbFaces; f++)
                         {
-                            int a = face[4 * f], b = face[4 * f + 1], c = face[4 * f + 2];
-                            VEC3 v0(vert[3 * a], vert[3 * a + 1] + RENDER_H_OFF, vert[3 * a + 2]),
-                                v1(vert[3 * b], vert[3 * b + 1] + RENDER_H_OFF, vert[3 * b + 2]),
-                                v2(vert[3 * c], vert[3 * c + 1] + RENDER_H_OFF, vert[3 * c + 2]);
-                            geom->m_absTransform.transformVect(v0);
-                            geom->m_absTransform.transformVect(v1);
-                            geom->m_absTransform.transformVect(v2);
-                            allVertices.insert(allVertices.end(), {v0.X, v0.Y, v0.Z, v1.X, v1.Y, v1.Z, v2.X, v2.Y, v2.Z});
+                            int a = face[4 * f]; // 1st vertex index of face (stride = 4, because 3 vertex indices + 1 metadata flag)
+                            int b = face[4 * f + 1];
+                            int c = face[4 * f + 2];
+
+                            VEC3 v0(vertex[a * 3], vertex[a * 3 + 1] + RENDER_H_OFF, vertex[a * 3 + 2]);
+                            VEC3 v1(vertex[b * 3], vertex[b * 3 + 1] + RENDER_H_OFF, vertex[b * 3 + 2]);
+                            VEC3 v2(vertex[c * 3], vertex[c * 3 + 1] + RENDER_H_OFF, vertex[c * 3 + 2]);
+
+                            // local2world space transformation
+                            tiles[i][j]->physicsGeometry[k]->m_absTransform.transformVect(v0);
+                            tiles[i][j]->physicsGeometry[k]->m_absTransform.transformVect(v1);
+                            tiles[i][j]->physicsGeometry[k]->m_absTransform.transformVect(v2);
+
+                            // store triangles as 3 edges, because GL_LINE is the rendering mode set for game objects in OpenGL
+                            // triangle edge v0->v1
+                            allVertices.push_back(v0.X);
+                            allVertices.push_back(v0.Y);
+                            allVertices.push_back(v0.Z);
+                            allVertices.push_back(v1.X);
+                            allVertices.push_back(v1.Y);
+                            allVertices.push_back(v1.Z);
+
+                            // triangle edge v1->v2
+                            allVertices.push_back(v1.X);
+                            allVertices.push_back(v1.Y);
+                            allVertices.push_back(v1.Z);
+                            allVertices.push_back(v2.X);
+                            allVertices.push_back(v2.Y);
+                            allVertices.push_back(v2.Z);
+
+                            // triangle edge v2->v0
+                            allVertices.push_back(v2.X);
+                            allVertices.push_back(v2.Y);
+                            allVertices.push_back(v2.Z);
+                            allVertices.push_back(v0.X);
+                            allVertices.push_back(v0.Y);
+                            allVertices.push_back(v0.Z);
                         }
                     }
                 }
             }
-
-        // mark where the triangle section ends
-        outFillVertexCount = (int)allVertices.size();
-
-        // now re‑walk everything just to build *wireframe* lines,
-        // exactly as your original wireframe code did:
-        for (int i = 0; i < tilesX; i++)
-            for (int j = 0; j < tilesZ; j++)
-            {
-                if (!tiles[i][j] || tiles[i][j]->physicsGeometry.empty())
-                    continue;
-                for (auto *geom : tiles[i][j]->physicsGeometry)
-                {
-                    int type = geom->m_geomType;
-                    // BOX edges
-                    if (type == PHYSICS_GEOM_TYPE_BOX)
-                    {
-                        VEC3 &h = geom->m_halfSize;
-                        VEC3 v[8] = {/* same 8 vertices */};
-                        for (auto &vv : v)
-                            geom->m_absTransform.transformVect(vv);
-                        int E[12][2] = {
-                            {0, 1}, {1, 2}, {2, 3}, {3, 0}, {4, 5}, {5, 6}, {6, 7}, {7, 4}, {0, 4}, {1, 5}, {2, 6}, {3, 7}};
-                        for (auto &e : E)
-                        {
-                            allVertices.insert(allVertices.end(), {v[e[0]].X, v[e[0]].Y, v[e[0]].Z,
-                                                                   v[e[1]].X, v[e[1]].Y, v[e[1]].Z});
-                        }
-                    }
-                    // CYLINDER edges
-                    else if (type == PHYSICS_GEOM_TYPE_CYLINDER)
-                    { /* same 3× loops (bottom ring, top ring, vertical edges) */
-                    }
-
-                    // MESH edges
-                    else if (type == PHYSICS_GEOM_TYPE_MESH)
-                    {
-                        auto *m = geom->m_refMesh;
-                        if (!m)
-                            continue;
-                        const float RENDER_H_OFF = 0.10f;
-                        int F = m->GetNbFace();
-                        auto face = m->GetFacePointer();
-                        auto vert = m->GetVertexPointer();
-                        for (int f = 0; f < F; ++f)
-                        {
-                            int a = face[4 * f], b = face[4 * f + 1], c = face[4 * f + 2];
-                            VEC3 v0(vert[3 * a], vert[3 * a + 1] + RENDER_H_OFF, vert[3 * a + 2]),
-                                v1(vert[3 * b], vert[3 * b + 1] + RENDER_H_OFF, vert[3 * b + 2]),
-                                v2(vert[3 * c], vert[3 * c + 1] + RENDER_H_OFF, vert[3 * c + 2]);
-                            geom->m_absTransform.transformVect(v0);
-                            geom->m_absTransform.transformVect(v1);
-                            geom->m_absTransform.transformVect(v2);
-                            // edges v0→v1, v1→v2, v2→v0
-                            allVertices.insert(allVertices.end(), {v0.X, v0.Y, v0.Z, v1.X, v1.Y, v1.Z,
-                                                                   v1.X, v1.Y, v1.Z, v2.X, v2.Y, v2.Z,
-                                                                   v2.X, v2.Y, v2.Z, v0.X, v0.Y, v0.Z});
-                        }
-                    }
-                }
-            }
+        }
 
         return allVertices;
     }
@@ -546,35 +656,29 @@ public:
     //! Renders terrain and physics geometry meshes.
     void draw(glm::mat4 view, glm::mat4 projection)
     {
-        if (!terrainLoaded)
-            return;
+        if (terrainLoaded)
+        {
+            shader.use();
+            shader.setMat4("model", glm::mat4(1.0f));
+            shader.setMat4("view", view);
+            shader.setMat4("projection", projection);
 
-        shader.use();
-        shader.setMat4("model", glm::mat4(1.0f));
-        shader.setMat4("view", view);
-        shader.setMat4("projection", projection);
+            glBindVertexArray(trnVAO);
+            shader.setInt("renderMode", 1);
+            glLineWidth(2.0f);
+            glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+            glDrawArrays(GL_TRIANGLES, 0, terrainVertices.size() / 3);
 
-        glBindVertexArray(trnVAO);
+            shader.setInt("renderMode", 2);
+            glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+            glDrawArrays(GL_TRIANGLES, 0, terrainVertices.size() / 3);
 
-        shader.setInt("renderMode", 1);
-        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-        glDrawArrays(GL_TRIANGLES, 0, terrainVertices.size() / 3);
-
-        shader.setInt("renderMode", 2);
-        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-        glDrawArrays(GL_TRIANGLES, 0, terrainVertices.size() / 3);
-
-        glBindVertexArray(phyVAO);
-
-        shader.setInt("renderMode", 4);
-        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-        glDrawArrays(GL_TRIANGLES, 0, fillCount / 3);
-
-        shader.setInt("renderMode", 2);
-        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-        glDrawArrays(GL_LINES, fillCount / 3, (physicsVertices.size() - fillCount) / 3);
-
-        glBindVertexArray(0);
+            glBindVertexArray(phyVAO);
+            shader.setInt("renderMode", 2);
+            glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+            glDrawArrays(GL_LINES, 0, physicsVertices.size() / 3);
+            glBindVertexArray(0);
+        }
     }
 };
 
