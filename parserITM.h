@@ -53,10 +53,10 @@ struct EntityInfo
 
 class TileTerrain; // forward declaration
 
-inline void loadEntity(CZipResReader *physicsArchive, const char *fname, const EntityInfo &entityInfo, TileTerrain *tile, const VEC3 &tileOff);
+inline void loadEntity(CZipResReader *physicsArchive, const char *fname, const EntityInfo &entityInfo, TileTerrain *tile, const VEC3 &tileOff, Terrain &terrain);
 
 //! Processes a single .itm file, retrieving the tile's game object resource names, and loading all physics for base entities for each of them.
-inline void loadTileEntities(CZipResReader *itemsArchive, CZipResReader *physicsArchive, int gridX, int gridZ, TileTerrain *tile)
+inline void loadTileEntities(CZipResReader *itemsArchive, CZipResReader *physicsArchive, int gridX, int gridZ, TileTerrain *tile, Terrain &terrain)
 {
   // 2.7. Load .itm file into memory.
   char tmpName[256];
@@ -98,13 +98,13 @@ inline void loadTileEntities(CZipResReader *itemsArchive, CZipResReader *physics
     for (int j = 0; j < header->entityCount; j++)
     {
       if (entityData[j].fileNameIdx == i)
-        loadEntity(physicsArchive, fileName, entityData[j], tile, VEC3(64.0f * header->gridX, 0, 64.0f * header->gridZ)); // load physics for an entity
+        loadEntity(physicsArchive, fileName, entityData[j], tile, VEC3(64.0f * header->gridX, 0, 64.0f * header->gridZ), terrain); // load physics for an entity
     }
   }
 }
 
 //! Loads physics geometry for a single base entity.
-inline void loadEntity(CZipResReader *physicsArchive, const char *fname, const EntityInfo &entityInfo, TileTerrain *tile, const VEC3 &tileOff)
+inline void loadEntity(CZipResReader *physicsArchive, const char *fname, const EntityInfo &entityInfo, TileTerrain *tile, const VEC3 &tileOff, Terrain &terrain)
 {
   switch (entityInfo.type)
   {
@@ -135,12 +135,18 @@ inline void loadEntity(CZipResReader *physicsArchive, const char *fname, const E
       // CPhysics::instance()->RegisterGeom(physicsGeom, &(tile->m_pGeomList));
     }
 
-    // [TODO load .bdae models]
-    // Camera camera;
-    // Model model(camera);
-    // model.loadTerrainEntity(fname);
+    // build OpenGL style model matrix
+    glm::mat4 model(1.0f);
+    model = glm::translate(model, glm::vec3(entityInfo.relativePos.X + tileOff.X, entityInfo.relativePos.Y + tileOff.Y, entityInfo.relativePos.Z + tileOff.Z));
+    model *= glm::mat4_cast(glm::quat(entityInfo.rotation.W, entityInfo.rotation.X, entityInfo.rotation.Y, entityInfo.rotation.Z));
+    model = glm::scale(model, glm::vec3(entityInfo.scale.X, entityInfo.scale.Y, entityInfo.scale.Z));
 
-    // tile->models.push_back(&model);
+    // load .bdae model
+    // Model *bdaeModel = new Model();
+    // bdaeModel->load(fname, model);
+
+    // if (bdaeModel->modelLoaded)
+    //   tile->models.push_back(bdaeModel);
 
     break;
   }

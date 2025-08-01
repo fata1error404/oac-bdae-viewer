@@ -1,8 +1,11 @@
 #ifndef LIGHT_H
 #define LIGHT_H
 
+#include "libs/glad/glad.h"
+#include "libs/glm/glm.hpp"
+#include "shader.h"
+
 // lighting settings
-bool showLighting = false;
 const glm::vec3 lightPos(-20.0f, 0.0f, 0.0f); // world-space position of the light source
 const glm::vec3 lightColor(1.0f);             // white color
 const float ambientStrength = 0.5f;
@@ -13,14 +16,13 @@ class Light
 {
 public:
     Shader shader;
-    Camera &camera;
     unsigned int VAO, VBO;
     unsigned int texture;
+    bool showLighting;
 
-    Light(Camera &cam)
+    Light()
         : shader("shader lightcube.vs", "shader lightcube.fs"),
-          camera(cam)
-
+          showLighting(false)
     {
         shader.use();
         shader.setMat4("model", glm::translate(glm::mat4(1.0f), lightPos));
@@ -80,15 +82,15 @@ public:
 
     void draw(glm::mat4 view, glm::mat4 projection)
     {
-        if (showLighting)
-        {
-            shader.use();
-            shader.setMat4("view", view);
-            shader.setMat4("projection", projection);
-            glBindVertexArray(VAO);
-            glDrawArrays(GL_TRIANGLES, 0, 36);
-            glBindVertexArray(0);
-        }
+        if (!showLighting)
+            return;
+
+        shader.use();
+        shader.setMat4("view", view);
+        shader.setMat4("projection", projection);
+        glBindVertexArray(VAO);
+        glDrawArrays(GL_TRIANGLES, 0, 36);
+        glBindVertexArray(0);
     }
 };
 

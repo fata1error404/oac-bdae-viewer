@@ -12,7 +12,7 @@
 #define PHYSICS_GEOM_TYPE_MESH 7
 #define PHYSICS_GEOM_TYPE_INFINITE_PLANE 8
 
-class Terrain;
+// class Terrain;
 
 class PhysicsRefMesh
 {

@@ -6,19 +6,19 @@
 #include "libs/glm/glm.hpp"                  // library for OpenGL style mathematics (basic vector and matrix mathematics functions)
 #include "libs/glm/gtc/matrix_transform.hpp" // for matrix transformation functions
 #include "libs/glm/gtc/type_ptr.hpp"         // for matrix conversion to raw pointers (OpenGL compatibility with GLM)
+#include "libs/stb_image.h"                  // library for image loading
 #include "libs/imgui/imgui.h"                // library for UI elements
 #include "libs/imgui/imgui_impl_opengl3.h"   // connects Dear ImGui with OpenGL
 #include "libs/imgui/imgui_impl_glfw.h"      // connects Dear ImGui with GLFW
 #include "libs/imgui/ImGuiFileDialog.h"      // extension for file browsing dialog
 
-#define STB_IMAGE_IMPLEMENTATION // define a STB_IMAGE_IMPLEMENTATION macro (to tell the compiler to include function implementations)
-#include "libs/stb_image.h"      // library for image loading
-#include "shader.h"              // implementation of the graphics pipeline
-#include "camera.h"              // implementation of the camera system
-#include "sound.h"               // implementation of the sound system
-#include "light.h"               // definition of the light settings and light cube
-#include "parserBDAE.h"          // parser for 3D models
-#include "parserTRN.h"           // parser for terrain meshes
+#include "shader.h"     // implementation of the graphics pipeline
+#include "camera.h"     // implementation of the camera system
+#include "sound.h"      // implementation of the sound system
+#include "light.h"      // definition of the light settings and light cube
+#include "terrain.h"    // implementation of the terrain engine
+#include "parserBDAE.h" // parser for 3D models
+#include "parserTRN.h"  // parser for terrain meshes
 
 #ifdef __linux__
 #include <GLFW/glfw3.h> // library for creating windows and handling input – mouse clicks, keyboard input, or window resizes
@@ -45,6 +45,13 @@ unsigned int currentWindowHeight = DEFAULT_WINDOW_HEIGHT;
 // create a Camera class instance with a specified position and default values for other parameters, to access its functionality
 Camera ourCamera;
 
+// for passing local application variables to callback functions (GLFW supports only one user pointer per window, so to pass multiple objects, we wrap them in a context struct and pass a pointer to that struct)
+struct AppContext
+{
+    Model *model;
+    Light *light;
+};
+
 float deltaTime = 0.0f; // time between current frame and last frame
 float lastFrame = 0.0f; // time of last frame
 
@@ -55,6 +62,7 @@ double lastY = DEFAULT_WINDOW_HEIGHT / 2.0; // starting cursor position (y-axis)
 // viewer variables
 bool fileDialogOpen = false;       // flag that indicates whether to block all background inputs (when the file browsing dialog is open)
 bool settingsPanelHovered = false; // flag that indicated whether to block background mouse input (when interacting with the settings panel)
+bool displayBaseMesh = false;      // flag that indicates base / textured mesh display mode
 bool isTerrainViewer = true;
 
 int main()
@@ -115,7 +123,7 @@ int main()
 
     // configure file browsing dialog
     IGFD::FileDialogConfig cfg;
-    cfg.path = "";                                                                         // default path
+    cfg.path = "./data/model";                                                             // default path
     cfg.fileName = "";                                                                     // default file name (none)
     cfg.filePathName = "";                                                                 // default file path name (none)
     cfg.countSelectionMax = 1;                                                             // only allow to select one file
@@ -140,13 +148,19 @@ int main()
     glEnable(GL_BLEND);                                // enable blending with the scene
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); // use the opacity value of the model texture to blend it correctly, ensuring smooth transparency on the edges
 
+    Light ourLight;
+
     Sound ourSound;
 
-    Light lightSource(ourCamera);
+    Model bdaeModel;
 
-    Model bdaeModel(ourCamera);
+    Terrain terrainModel(ourCamera, ourLight);
 
-    Terrain terrainModel;
+    AppContext appContext;
+    appContext.model = &bdaeModel;
+    appContext.light = &ourLight;
+
+    glfwSetWindowUserPointer(window, &appContext);
 
     // game loop
     while (!glfwWindowShouldClose(window))
@@ -178,7 +192,7 @@ int main()
         // add a button that opens file browsing dialog
         if (ImGui::Button(isTerrainViewer ? "Load Terrain (beta)" : "Load Model"))
         {
-            cfg.path = isTerrainViewer ? "./data/terrain" : "./data/model";
+            cfg.path = isTerrainViewer ? "./data/terrain" : cfg.path;
 
             IGFD::FileDialog::Instance()->OpenDialog(
                 "File_Browsing_Dialog",                         // dialog ID (used to reference this dialog instance)
@@ -232,7 +246,7 @@ int main()
         }
 
         // if a model is loaded, show its stats + checkboxes
-        if (modelLoaded && !isTerrainViewer)
+        if (bdaeModel.modelLoaded && !isTerrainViewer)
         {
             ImGui::Spacing();
             ImGui::TextWrapped("File:\xC2\xA0%s", bdaeModel.fileName.c_str());
@@ -242,7 +256,7 @@ int main()
             ImGui::NewLine();
             ImGui::Checkbox("Base Mesh On/Off", &displayBaseMesh);
             ImGui::Spacing();
-            ImGui::Checkbox("Lighting On/Off", &showLighting);
+            ImGui::Checkbox("Lighting On/Off", &ourLight.showLighting);
             ImGui::NewLine();
             ImGui::Text("Alternative colors: %d", bdaeModel.alternativeTextureCount);
             ImGui::Spacing();
@@ -257,7 +271,7 @@ int main()
             ourSound.updateSoundUI(bdaeModel.sounds);
         }
 
-        if (terrainLoaded && isTerrainViewer)
+        if (terrainModel.terrainLoaded && isTerrainViewer)
         {
             ImGui::Spacing();
             ImGui::TextWrapped("File:\xC2\xA0%s", terrainModel.fileName.c_str());
@@ -292,9 +306,9 @@ int main()
 
         if (!isTerrainViewer)
         {
-            bdaeModel.draw(view, projection); // render model
+            bdaeModel.draw(view, projection, ourCamera.Position, ourLight.showLighting, displayBaseMesh); // render model
 
-            lightSource.draw(view, projection); // render light cube
+            ourLight.draw(view, projection); // render light cube
         }
         else
             terrainModel.draw(view, projection); // render terrain
@@ -345,8 +359,10 @@ void mouse_callback(GLFWwindow *window, double xpos, double ypos)
     // only rotate the mesh if the right mouse button is pressed
     if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS)
     {
-        meshYaw += xoffset * meshRotationSensitivity;
-        meshPitch += -yoffset * meshRotationSensitivity;
+        AppContext *ctx = static_cast<AppContext *>(glfwGetWindowUserPointer(window));
+
+        ctx->model->meshYaw += xoffset * meshRotationSensitivity;
+        ctx->model->meshPitch += -yoffset * meshRotationSensitivity;
         return;
     }
 
@@ -368,6 +384,8 @@ void mouse_callback(GLFWwindow *window, double xpos, double ypos)
 // whenever a key is pressed, this callback function executes and only once, preventing continuous toggling when a key is held down (which would occur in processInput)
 void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods)
 {
+    AppContext *ctx = static_cast<AppContext *>(glfwGetWindowUserPointer(window));
+
     if (action == GLFW_PRESS)
     {
         switch (key)
@@ -376,7 +394,7 @@ void key_callback(GLFWwindow *window, int key, int scancode, int action, int mod
             displayBaseMesh = !displayBaseMesh;
             break;
         case GLFW_KEY_L:
-            showLighting = !showLighting;
+            ctx->light->showLighting = !ctx->light->showLighting;
             break;
         case GLFW_KEY_F:
         {

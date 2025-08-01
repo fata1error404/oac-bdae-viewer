@@ -3,7 +3,7 @@
 
 #include <string.h>
 #include "access.h"
-#include "libs/oac/io/CPackResReader.h"
+#include "CPackResReader.h"
 
 // .bdae file header structure
 struct FileHeaderData

@@ -16,7 +16,7 @@
 
 static unsigned char s_loadBuffer[DEFAULT_LOAD_BUFFER_SIZE];
 
-bool terrainLoaded = false;
+// bool terrainLoaded = false;
 
 struct TRNFileHeader
 {

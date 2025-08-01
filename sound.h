@@ -1,7 +1,11 @@
 #ifndef SOUND_H
 #define SOUND_H
 
-#define MINIAUDIO_IMPLEMENTATION
+#include <string>
+#include <vector>
+#include <filesystem>
+#include "libs/stb_image.h"
+#include "libs/imgui/imgui.h"
 #include "libs/miniaudio.h" // library for audio playback
 
 const std::filesystem::path soundPath("data/sound/"); // default directory with all '.wav' files

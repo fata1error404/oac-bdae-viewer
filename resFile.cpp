@@ -1,8 +1,9 @@
 #include <iostream>
 #include <iomanip>
 #include <cstdint>
+#include "Logger.h"
 #include "resFile.h"
-#include "libs/oac/io/PackPatchReader.h"
+#include "PackPatchReader.h"
 
 int File::SizeOfHeader = 0;
 
@@ -18,54 +19,52 @@ char *File::ExternalFilePtr[2] = {0, 0};
 
 int File::Init(IReadResFile *file)
 {
-    std::cout << "[Init] Starting File::Init..\n"
-              << std::endl;
-    std::cout << "---------------" << std::endl;
-    std::cout << "[Init] PART 1. \n       Reading raw binary data from .bdae file and loading its sections into memory." << std::endl;
-    std::cout << "---------------\n\n"
-              << std::endl;
+    LOG("[Init] Starting File::Init..\n");
+    LOG("---------------");
+    LOG("[Init] PART 1. \n       Reading raw binary data from .bdae file and loading its sections into memory.");
+    LOG("---------------\n\n");
 
     // 1. Read Header data as a structure.
     Size = file->getSize();
     int headerSize = sizeof(struct FileHeaderData);
     struct FileHeaderData *header = new FileHeaderData;
 
-    std::cout << "[Init] Header size (size of struct): " << headerSize << std::endl;
-    std::cout << "[Init] File size (length of file): " << Size << std::endl;
-    std::cout << "[Init] File name: " << file->getFileName() << std::endl;
-    std::cout << "\n[Init] At position " << file->getPos() << ", reading header.." << std::endl;
+    LOG("[Init] Header size (size of struct): ", headerSize);
+    LOG("[Init] File size (length of file): ", Size);
+    LOG("[Init] File name: ", file->getFileName());
+    LOG("\n[Init] At position ", file->getPos(), ", reading header..");
 
     file->read(header, headerSize);
 
-    std::cout << "_________________" << std::endl;
-    std::cout << "\nFile Header Data\n"
-              << std::endl;
-    std::cout << "Signature: " << std::hex << ((char *)&header->signature)[0] << ((char *)&header->signature)[1] << ((char *)&header->signature)[2] << ((char *)&header->signature)[3] << std::dec << std::endl;
-    std::cout << "Endian check: " << header->endianCheck << std::endl;
-    std::cout << "Version: " << header->version << std::endl;
-    std::cout << "Header size: " << header->sizeOfHeader << std::endl;
-    std::cout << "File size: " << header->sizeOfFile << std::endl;
-    std::cout << "Number of offsets: " << header->numOffsets << std::endl;
-    std::cout << "Origin: " << header->origin << std::endl;
-    std::cout << "\nSection offsets  " << std::endl;
-    std::cout << "Offset Data:   " << header->offsets.m_offset << std::endl;
-    std::cout << "String Data:   " << header->stringData.m_offset << std::endl;
-    std::cout << "Data:          " << header->data.m_offset << std::endl;
-    std::cout << "Related files: " << header->relatedFiles.m_offset << std::endl;
-    std::cout << "Removable:     " << header->removable.m_offset << std::endl;
-    std::cout << "\nSize of Removable Chunk: " << header->sizeOfRemovableChunk << std::endl;
-    std::cout << "Number of Removable Chunks: " << header->nbOfRemovableChunks << std::endl;
-    std::cout << "Use separated allocation: " << ((header->useSeparatedAllocationForRemovableBuffers > 0) ? "Yes" : "No") << std::endl;
-    std::cout << "Size of Dynamic Chunk: " << header->sizeOfDynamicChunk << std::endl;
-    std::cout << "________________________\n"
-              << std::endl;
+    LOG("_________________");
+    LOG("\nFile Header Data\n");
+    std::ostringstream hexStream;
+    hexStream << "Signature: " << std::hex << ((char *)&header->signature)[0] << ((char *)&header->signature)[1] << ((char *)&header->signature)[2] << ((char *)&header->signature)[3] << std::dec;
+    LOG(hexStream.str());
+    LOG("Endian check: ", header->endianCheck);
+    LOG("Version: ", header->version);
+    LOG("Header size: ", header->sizeOfHeader);
+    LOG("File size: ", header->sizeOfFile);
+    LOG("Number of offsets: ", header->numOffsets);
+    LOG("Origin: ", header->origin);
+    LOG("\nSection offsets  ");
+    LOG("Offset Data:   ", header->offsets.m_offset);
+    LOG("String Data:   ", header->stringData.m_offset);
+    LOG("Data:          ", header->data.m_offset);
+    LOG("Related files: ", header->relatedFiles.m_offset);
+    LOG("Removable:     ", header->removable.m_offset);
+    LOG("\nSize of Removable Chunk: ", header->sizeOfRemovableChunk);
+    LOG("Number of Removable Chunks: ", header->nbOfRemovableChunks);
+    LOG("Use separated allocation: ", ((header->useSeparatedAllocationForRemovableBuffers > 0) ? "Yes" : "No"));
+    LOG("Size of Dynamic Chunk: ", header->sizeOfDynamicChunk);
+    LOG("________________________\n");
 
     // 2. Search for related files.
     unsigned int beginOfRelatedFiles = header->relatedFiles.m_offset - header->origin;
 
     if (header->origin == 0)
     {
-        std::cout << "[Init] At position " << beginOfRelatedFiles << ", checking for related filenames.." << std::endl;
+        LOG("[Init] At position ", beginOfRelatedFiles, ", checking for related filenames..");
 
         // read name size of the related file
         int sizeOfName = 0;
@@ -73,16 +72,22 @@ int File::Init(IReadResFile *file)
         file->read(&sizeOfName, 4);
 
         unsigned char *bytes = reinterpret_cast<unsigned char *>(&sizeOfName);
-        std::cout << "[Init] Size of related filename: ";
-        for (int i = 0; i < 4; ++i)
-            std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(bytes[i]) << " ";
+        LOG("[Init] Size of related filename: ");
 
-        std::cout << std::dec;
-        std::cout << "(" << sizeOfName << " byte)" << std::endl;
+        std::ostringstream hexStream;
+        hexStream << std::hex << std::setfill('0');
+
+        for (int i = 0; i < 4; ++i)
+            hexStream << std::setw(2) << static_cast<int>(bytes[i]) << " ";
+
+        hexStream << std::dec;
+
+        LOG(hexStream.str());
+        LOG("(", sizeOfName, " byte)");
 
         // validity check: name size should not exceed the limit for filename length
         if (sizeOfName > 256)
-            std::cout << "[Init] Warning: sizeOfName exceeds buffer size!" << std::endl;
+            LOG("[Init] Warning: sizeOfName exceeds buffer size!");
 
         // validity check: name is real (size 1 means none)
         if (sizeOfName > 1)
@@ -93,14 +98,13 @@ int File::Init(IReadResFile *file)
             file->seek(beginOfRelatedFiles);
             file->read(relatedFileName, (sizeOfName + 3) & ~3); // align to next 4 bytes, as name size may not be a multiple of 4
 
-            std::cout << "[Init] Filename: " << relatedFileName << std::endl;
+            LOG("[Init] Filename: ", relatedFileName);
 
             // load related bdae file (?)
             // collada::CResFileManager::getInst()->get(buff, NULL, true);
         }
         else
-            std::cout << "[Init] Invalid name. No related files found."
-                      << std::endl;
+            LOG("[Init] Invalid name. No related files found.");
     }
 
     // 3. Initialize File struct variables and allocate memory for reading rest of the file.
@@ -125,14 +129,14 @@ int File::Init(IReadResFile *file)
 
     // 4. Read offset, string, data and related files sections as a raw binary data.
     file->seek(headerSize);
-    std::cout << "\n[Init] At position " << file->getPos() << ", reading offset " << (sizeStringTable ? "and string tables.." : "table..") << std::endl;
+    LOG("\n[Init] At position ", file->getPos(), ", reading offset ", (sizeStringTable ? "and string tables.." : "table.."));
 
     file->read(offsetBuffer, sizeOffsetTable);
 
     if (sizeStringTable)
         file->read(stringBuffer, sizeStringTable);
 
-    std::cout << "\n[Init] At position " << file->getPos() << ", reading rest of the file (up to the removable section).." << std::endl;
+    LOG("\n[Init] At position ", file->getPos(), ", reading rest of the file (up to the removable section)..");
     file->read(&buffer[headerSize], SizeUnRemovable - headerSize); // insert after header
 
     // 5. Read removable chunks.
@@ -141,25 +145,21 @@ int File::Init(IReadResFile *file)
     if (SizeRemovableBuffer > 0)
     {
         // read size / offset pairs for each removable chunk
-        std::cout << "\n[Init] At position " << file->getPos() << ", reading removable section info.." << std::endl;
+        LOG("\n[Init] At position ", file->getPos(), ", reading removable section info..");
         RemovableBuffersInfo = new uint64_t[NbRemovableBuffers * 2];
         file->read(RemovableBuffersInfo, NbRemovableBuffers * 2 * sizeof(uint64_t));
 
-        std::cout << "\n_____________________\n"
-                  << std::endl;
-        std::cout << "Removable chunks info" << std::endl;
-        std::cout << "[#] (size, offset)" << std::endl;
+        LOG("\n_____________________\n");
+        LOG("Removable chunks info");
+        LOG("[#] (size, offset)");
+
         for (int i = 0; i < NbRemovableBuffers; ++i)
-        {
-            std::cout << "[" << i + 1 << "] " << "(" << RemovableBuffersInfo[i * 2]
-                      << ", " << RemovableBuffersInfo[i * 2 + 1] << ")"
-                      << std::endl;
-        }
-        std::cout << "________________\n"
-                  << std::endl;
+            LOG("[", i + 1, "] ", "(", RemovableBuffersInfo[i * 2], ", ", RemovableBuffersInfo[i * 2 + 1], ")");
+
+        LOG("________________\n");
 
         // read chunks data
-        std::cout << "[Init] At position " << file->getPos() << ", reading removable section data.." << std::endl;
+        LOG("[Init] At position ", file->getPos(), ", reading removable section data..");
         RemovableBuffers = new void *[NbRemovableBuffers];
 
         if (UseSeparatedAllocationForRemovableBuffers)
@@ -195,7 +195,7 @@ int File::Init(IReadResFile *file)
         }
     }
 
-    std::cout << "[Init] Stopped reading " << file->getFileName() << " at position " << file->getPos() << " (end of file)." << std::endl;
+    LOG("[Init] Stopped reading ", file->getFileName(), " at position ", file->getPos(), " (end of file).");
 
     delete header;
 
@@ -225,10 +225,9 @@ int File::Init(IReadResFile *file)
 
 int File::Init()
 {
-    std::cout << "\n\n\n\n---------------" << std::endl;
-    std::cout << "[Init] PART 2. \n       Resolving all relative offsets in the loaded .bdae file: convert them to direct pointers, handle internal vs. external references, string data extraction, and removable chunks." << std::endl;
-    std::cout << "---------------\n\n"
-              << std::endl;
+    LOG("\n\n\n\n---------------");
+    LOG("[Init] PART 2. \n       Resolving all relative offsets in the loaded .bdae file: convert them to direct pointers, handle internal vs. external references, string data extraction, and removable chunks.");
+    LOG("---------------\n\n");
 
     // 6. Prepare for file processing: retrieve the Header struct from memory and initialize File struct variables (we replaced the File object with a new one by calling the second Init(), so this is the actual initialization).
     FileHeaderData *header = ptr();
@@ -261,7 +260,7 @@ int File::Init()
         ((char *)&header->signature)[2] != 'E' ||
         ((char *)&header->signature)[3] != 'S')
     {
-        std::cout << "[Init] Warning: wrong signature!" << std::endl;
+        LOG("[Init] Warning: wrong signature!");
         return -1;
     }
 
@@ -269,12 +268,12 @@ int File::Init()
     if (header && (header->version & 0x8000) == 0)
     {
         header->version |= 0x8000; // set the high bit of the version by doing a bitwise OR with 0x8000
-        std::cout << "[Init] Passed validity checks! This file hasn't been processed yet. Proceeding with configuration.." << std::endl;
+        LOG("[Init] Passed validity checks! This file hasn't been processed yet. Proceeding with configuration..");
 
         // 7a. There is a temporary, separate, deletable buffer for the offset table (allocated in the first Init()). We have to process each table entry, correcting it, retrieving string data, and then converting its contained relative offset to a direct pointer.
         if (OffsetTable)
         {
-            std::cout << "[Init] Using a temporary buffer for offset table. Retrieving the string data, applying offset correction, and performing offset-to-pointer conversion.." << std::endl;
+            LOG("[Init] Using a temporary buffer for offset table. Retrieving the string data, applying offset correction, and performing offset-to-pointer conversion..");
 
             SizeOfHeader = header->sizeOfHeader;
             (&header->offsets)[0] = OffsetTable; // override the address of the offset table in the Header struct to point to the temp buffer for offset table (this allows to perform all pointer fix-ups against our own copy and safely free or reallocate it without touching the original memory block mapped from the .bdae file)
@@ -315,7 +314,7 @@ int File::Init()
                     external = true; // mark that we are now resolving an external reference
                 }
 
-                // std::cout << "[" << i + 1 << "] " << offptr << std::endl;
+                // LOG("[", i + 1, "] ", offptr);
 
                 // if this entry’s target lies after the Offset Data section
                 if (offptr >= ote)
@@ -421,7 +420,7 @@ int File::Init()
                         ste = ExternalFileStringTableSize[offptrptr >> 31];
                     }
 
-                    // std::cout << "[" << i + 1 << "] " << offptrptr << std::endl;
+                    // LOG("[", i + 1, "] ", offptrptr);
 
                     if (offptrptr >= ote)
                     {
@@ -461,7 +460,7 @@ int File::Init()
         /* 7b. This occurs when a temporary buffer is not used. The offset table is in-place — directly in the file’s main memory buffer — no separate deletable buffer (OffsetTable == NULL), so no need to retrieve or correct anything. Simply convert relative offsets to direct pointers. */
         else
         {
-            std::cout << "[Init] No temporary buffer found for offset table, though no retrieval or correction required. Only performing offset-to-pointer conversion.." << std::endl;
+            LOG("[Init] No temporary buffer found for offset table, though no retrieval or correction required. Only performing offset-to-pointer conversion..");
 
             // if the offset table is in-place, then the string table must be as well
             if (StringTable != NULL)
@@ -483,18 +482,15 @@ int File::Init()
         }
     }
 
-    std::cout << "\n[Init] Finishing File::Init..\n\n"
-              << std::endl;
+    LOG("\n[Init] Finishing File::Init..\n\n");
 
-    std::cout << "_____________________" << std::endl;
-    std::cout << "\nExtracted String Data\n"
-              << std::endl;
+    LOG("_____________________");
+    LOG("\nExtracted String Data\n");
 
     for (int i = 0; i < (int)StringStorage.size(); ++i)
-        std::cout << "[" << std::setw(2) << i + 1 << "] \"" << StringStorage[i] << "\"" << std::endl;
+        LOG("[", std::setw(2), i + 1, "] \"", StringStorage[i], "\"");
 
-    std::cout << "_____________________\n"
-              << std::endl;
+    LOG("_____________________\n");
 
     return 0;
 }
