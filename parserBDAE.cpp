@@ -446,6 +446,8 @@ void Model::load(const char *fpath, glm::mat4 modelMatrix)
 {
     reset();
 
+    std::vector<std::string> textureNames;
+
     model = modelMatrix;
 
     CPackPatchReader *bdaeArchive = new CPackPatchReader((std::string("data/model/unsorted/") + (fpath + 6)).c_str(), true, false);
@@ -524,6 +526,30 @@ void Model::load(const char *fpath, glm::mat4 modelMatrix)
             }
         }
 
+        ptr = (char *)myFile.DataBuffer + 80 + 96;
+        memcpy(&textureCount, ptr, sizeof(int));
+
+        for (int i = 0, n = myFile.StringStorage.size(); i < n; i++)
+        {
+            std::string s = myFile.StringStorage[i];
+
+            for (char &c : s)
+                c = std::tolower(c);
+
+            if (s.rfind("texture/", 0) == 0)
+                s.erase(0, 8);
+
+            if (s.length() >= 4 && s.compare(s.length() - 4, 4, ".tga") == 0 && s[0] != '_' && s.substr(0, 3) != "e:/")
+            {
+                s.replace(s.length() - 4, 4, ".png");
+
+                s = "data/texture/unsorted/" + s;
+
+                if (std::find(textureNames.begin(), textureNames.end(), s) == textureNames.end())
+                    textureNames.push_back(s);
+            }
+        }
+
         free(myFile.DataBuffer);
         delete[] static_cast<char *>(myFile.RemovableBuffers[0]);
         delete[] myFile.RemovableBuffers;
@@ -556,6 +582,32 @@ void Model::load(const char *fpath, glm::mat4 modelMatrix)
         glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices[i].size() * sizeof(unsigned short), indices[i].data(), GL_STATIC_DRAW);
     }
 
+    textures.resize(textureNames.size());
+    glGenTextures(textureNames.size(), textures.data());
+
+    for (int i = 0; i < (int)textureNames.size(); i++)
+    {
+        glBindTexture(GL_TEXTURE_2D, textures[i]);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+        int width, height, nrChannels, format;
+        unsigned char *data = stbi_load(textureNames[i].c_str(), &width, &height, &nrChannels, 0);
+
+        if (!data)
+        {
+            std::cerr << "Failed to load texture: " << textureNames[i] << "\n";
+            continue;
+        }
+
+        format = (nrChannels == 4) ? GL_RGBA : GL_RGB;
+        glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
+        glGenerateMipmap(GL_TEXTURE_2D);
+        stbi_image_free(data);
+    }
+
     std::string modelPath(fpath);
     fileName = modelPath.substr(modelPath.find_last_of("/\\") + 1);
 
@@ -565,17 +617,10 @@ void Model::load(const char *fpath, glm::mat4 modelMatrix)
 //! Clears GPU memory and resets viewer state.
 void Model::reset()
 {
-    if (VAO)
-    {
-        glDeleteVertexArrays(1, &VAO);
-        VAO = 0;
-    }
+    glDeleteVertexArrays(1, &VAO);
+    glDeleteBuffers(1, &VBO);
 
-    if (VBO)
-    {
-        glDeleteBuffers(1, &VBO);
-        VBO = 0;
-    }
+    VAO = VBO = 0;
 
     if (!EBOs.empty())
     {
@@ -604,11 +649,14 @@ void Model::draw(glm::mat4 view, glm::mat4 projection, glm::vec3 cameraPos, bool
     if (!modelLoaded)
         return;
 
-    model = glm::mat4(1.0f);
-    model = glm::translate(model, meshCenter); // a trick to build the correct model matrix that rotates the mesh around its center
-    model = glm::rotate(model, glm::radians(meshPitch), glm::vec3(1, 0, 0));
-    model = glm::rotate(model, glm::radians(meshYaw), glm::vec3(0, 1, 0));
-    model = glm::translate(model, -meshCenter);
+    if (meshCenter != glm::vec3(-1.0f)) // = if using 3D model viewer, where mesh center is initialized
+    {
+        model = glm::mat4(1.0f);
+        model = glm::translate(model, meshCenter); // a trick to build the correct model matrix that rotates the mesh around its center
+        model = glm::rotate(model, glm::radians(meshPitch), glm::vec3(1, 0, 0));
+        model = glm::rotate(model, glm::radians(meshYaw), glm::vec3(0, 1, 0));
+        model = glm::translate(model, -meshCenter);
+    }
 
     shader.use();
     shader.setMat4("model", model);
@@ -661,39 +709,5 @@ void Model::draw(glm::mat4 view, glm::mat4 projection, glm::vec3 cameraPos, bool
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBOs[i]);
             glDrawElements(GL_TRIANGLES, indices[i].size(), GL_UNSIGNED_SHORT, 0);
         }
-    }
-}
-
-void Model::draw(glm::mat4 view, glm::mat4 projection, glm::vec3 cameraPos)
-{
-    if (!modelLoaded)
-        return;
-
-    shader.use();
-    shader.setMat4("model", model);
-    shader.setMat4("view", view);
-    shader.setMat4("projection", projection);
-    shader.setBool("lighting", false);
-    shader.setVec3("cameraPos", cameraPos);
-
-    glBindVertexArray(VAO);
-
-    shader.setInt("renderMode", 1);
-    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-
-    for (int i = 0; i < totalSubmeshCount; i++)
-    {
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBOs[i]);
-        if (textureCount == totalSubmeshCount && i < (int)textures.size())
-        {
-            glActiveTexture(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_2D, textures[i]);
-        }
-        else if (alternativeTextureCount > 0 && textureCount == 1)
-        {
-            glBindTexture(GL_TEXTURE_2D, textures[selectedTexture]);
-        }
-
-        glDrawElements(GL_TRIANGLES, (GLsizei)indices[i].size(), GL_UNSIGNED_SHORT, 0);
     }
 }

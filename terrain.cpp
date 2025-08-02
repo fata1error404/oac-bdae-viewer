@@ -10,6 +10,7 @@
 #include "libs/glm/gtc/packing.hpp"
 #include "libs/glm/ext/vector_uint4.hpp"
 #include "libs/glm/gtc/type_precision.hpp"
+#include "parserITM.h"
 
 //! Loads .zip file from disk, performs parsing for each contained .trn file, sets up terrain mesh data and sound.
 void Terrain::load(const char *fpath, Sound &sound)
@@ -39,8 +40,8 @@ void Terrain::load(const char *fpath, Sound &sound)
 
         if (trnFile)
         {
-            int tileX, tileZ;                                                               // variables that will be assigned tile's position on the grid
-            TileTerrain *tile = TileTerrain::loadTileTerrain(trnFile, tileX, tileZ, *this); // .trn: load tile's terrain mesh data
+            int tileX, tileZ;                                                    // variables that will be assigned tile's position on the grid
+            TileTerrain *tile = TileTerrain::load(trnFile, tileX, tileZ, *this); // .trn: load tile's terrain mesh data
             loadTileEntities(itemsArchive, physicsArchive, tileX, tileZ, tile, *this);
 
             if (tile)
@@ -72,10 +73,10 @@ void Terrain::load(const char *fpath, Sound &sound)
             – map's tile data */
 
     // terrain borders in world space coordinates
-    minX = (float)tileMinX * UnitsInTile;
-    minZ = (float)tileMinZ * UnitsInTile;
-    maxX = (float)tileMaxX * UnitsInTile;
-    maxZ = (float)tileMaxZ * UnitsInTile;
+    minX = (float)tileMinX * ChunksInTile;
+    minZ = (float)tileMinZ * ChunksInTile;
+    maxX = (float)tileMaxX * ChunksInTile;
+    maxZ = (float)tileMaxZ * ChunksInTile;
 
     // 2D array for storing data of all tiles on the terrain
     // (basically 1D temp tmp_tiles vector is converted into a 2D array)
@@ -123,7 +124,7 @@ void Terrain::load(const char *fpath, Sound &sound)
 
                     int chunkCol = col / 8;
                     int chunkRow = row / 8;
-                    TileChunk &chunk = tiles[i][j]->chunks[chunkRow * 8 + chunkCol];
+                    ChunkInfo &chunk = tiles[i][j]->chunks[chunkRow * 8 + chunkCol];
                     int tex1 = chunk.texNameIndex1;
                     int tex2 = chunk.texNameIndex2;
                     int tex3 = chunk.texNameIndex3;
@@ -137,10 +138,10 @@ void Terrain::load(const char *fpath, Sound &sound)
                             rgba.a / 255.0f};
                     };
 
-                    auto blend00 = unpack_blend(tiles[i][j]->blending[row][col]);
-                    auto blend10 = unpack_blend(tiles[i][j]->blending[row][col + 1]);
-                    auto blend01 = unpack_blend(tiles[i][j]->blending[row + 1][col]);
-                    auto blend11 = unpack_blend(tiles[i][j]->blending[row + 1][col + 1]);
+                    auto blend00 = unpack_blend(tiles[i][j]->colors[row][col]);
+                    auto blend10 = unpack_blend(tiles[i][j]->colors[row][col + 1]);
+                    auto blend01 = unpack_blend(tiles[i][j]->colors[row + 1][col]);
+                    auto blend11 = unpack_blend(tiles[i][j]->colors[row + 1][col + 1]);
 
                     // === Unpacked normals ===
                     glm::vec3 n00 = tiles[i][j]->normals[row][col];
@@ -206,27 +207,16 @@ void Terrain::load(const char *fpath, Sound &sound)
     // 5. load texture(s)
     int textureCount = (int)textureNames.size();
     std::vector<unsigned char *> pixelData(textureCount);
-    int texW = 0, texH = 0, nrChannels = 0;
+    int w, h, c, nrChannels = 0;
 
     for (int i = 0; i < textureCount; ++i)
     {
-        int w, h, c;
         pixelData[i] = stbi_load(textureNames[i].c_str(), &w, &h, &c, 4);
+
         if (!pixelData[i])
         {
-            std::cerr << "Failed to load texture: " << textureNames[i] << "\n";
-            // handle error (e.g. assign a fallback or continue)
-        }
-        // Ensure all images are the same size, or choose max and pad smaller ones
-        if (i == 0)
-        {
-            texW = w;
-            texH = h;
-            nrChannels = 4;
-        }
-        else
-        {
-            // Optional: verify w == texW && h == texH
+            std::cout << "Failed to load texture: " << textureNames[i] << "\n";
+            continue;
         }
     }
 
@@ -235,13 +225,7 @@ void Terrain::load(const char *fpath, Sound &sound)
     glBindTexture(GL_TEXTURE_2D_ARRAY, textureMap);
 
     // Allocate storage: 1 mip level, RGBA8, width x height, depth = textureCount
-    glTexStorage3D(
-        GL_TEXTURE_2D_ARRAY,
-        1,
-        GL_RGBA8,
-        texW,
-        texH,
-        textureCount);
+    glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, GL_RGBA8, w, h, textureCount);
 
     // 3) Upload each image into its layer
     for (int i = 0; i < textureCount; ++i)
@@ -252,8 +236,8 @@ void Terrain::load(const char *fpath, Sound &sound)
                 GL_TEXTURE_2D_ARRAY,
                 0,       // mip level
                 0, 0, i, // x, y, layer
-                texW,
-                texH,
+                w,
+                h,
                 1, // depth = 1 slice
                 GL_RGBA,
                 GL_UNSIGNED_BYTE,
@@ -272,10 +256,8 @@ void Terrain::load(const char *fpath, Sound &sound)
 
     // 6) Free CPU image data
     for (auto ptr : pixelData)
-    {
         if (ptr)
             stbi_image_free(ptr);
-    }
 
     // 5. build the physics mesh vertex data in world space coordinates
     getEntitiesVertices(fillCount);
@@ -304,7 +286,6 @@ void Terrain::load(const char *fpath, Sound &sound)
     terrainLoaded = true;
 }
 
-//! Returns a single vector partitioned into [0…fillVerts) = triangles, [fillVerts…end) = lines.
 //! Returns a single vector partitioned into [0…fillVerts) = triangles, [fillVerts…end) = lines.
 void Terrain::getEntitiesVertices(int &outFillVertexCount)
 {
@@ -564,29 +545,17 @@ void Terrain::getEntitiesVertices(int &outFillVertexCount)
 //! Clears GPU memory and resets viewer state.
 void Terrain::reset()
 {
-    if (trnVAO)
-    {
-        glDeleteVertexArrays(1, &trnVAO);
-        trnVAO = 0;
-    }
+    tileMinX = tileMinZ = 1000;
+    tileMaxX = tileMaxZ = -1000;
+    tilesX = tilesZ = 0;
+    fileSize = vertexCount = faceCount = 0;
 
-    if (trnVBO)
-    {
-        glDeleteBuffers(1, &trnVBO);
-        trnVBO = 0;
-    }
+    glDeleteVertexArrays(1, &trnVAO);
+    glDeleteVertexArrays(1, &phyVAO);
+    glDeleteBuffers(1, &trnVBO);
+    glDeleteBuffers(1, &phyVBO);
 
-    if (phyVAO)
-    {
-        glDeleteVertexArrays(1, &phyVAO);
-        phyVAO = 0;
-    }
-
-    if (phyVBO)
-    {
-        glDeleteVertexArrays(1, &phyVBO);
-        phyVBO = 0;
-    }
+    trnVAO = trnVBO = phyVAO = phyVBO = 0;
 
     if (!textureNames.empty())
     {
@@ -594,25 +563,21 @@ void Terrain::reset()
         textureNames.clear();
     }
 
-    if (!tiles.empty())
-        for (int x = 0; x < tilesX; ++x)
-            for (int z = 0; z < tilesZ; ++z)
-                delete tiles[x][z];
+    for (auto &column : tiles)
+        for (TileTerrain *tile : column)
+            delete tile;
 
     tiles.clear();
 
     terrainVertices.clear();
     physicsVertices.clear();
     sounds.clear();
-    fileSize = vertexCount = faceCount = 0;
-    tileMinX = tileMinZ = -1;
-    tileMaxX = tileMaxZ = 1;
 
     terrainLoaded = false;
 }
 
 //! Renders terrain and physics geometry meshes.
-void Terrain::draw(glm::mat4 view, glm::mat4 projection)
+void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple)
 {
     if (!terrainLoaded)
         return;
@@ -630,32 +595,47 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection)
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D_ARRAY, textureMap);
 
-    shader.setInt("renderMode", 1);
-    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-    glDrawArrays(GL_TRIANGLES, 0, terrainVertices.size() / 6);
+    if (!simple)
+    {
+        shader.setInt("renderMode", 1);
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+        glDrawArrays(GL_TRIANGLES, 0, terrainVertices.size() / 6);
+    }
+    else
+    {
+        shader.setInt("renderMode", 3);
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+        glDrawArrays(GL_TRIANGLES, 0, terrainVertices.size() / 6);
+    }
 
-    glBindVertexArray(phyVAO);
+    // glBindVertexArray(phyVAO);
 
-    shader.setInt("renderMode", 4);
-    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-    glDrawArrays(GL_TRIANGLES, 0, fillCount / 3);
+    // shader.setInt("renderMode", 4);
+    // glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    // glDrawArrays(GL_TRIANGLES, 0, fillCount / 3);
 
-    shader.setInt("renderMode", 2);
-    glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-    glDrawArrays(GL_LINES, fillCount / 3, (physicsVertices.size() - fillCount) / 3);
+    // shader.setInt("renderMode", 2);
+    // glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+    // glDrawArrays(GL_LINES, fillCount / 3, (physicsVertices.size() - fillCount) / 3);
 
-    // for (int i = 0; i < tilesX; i++)
-    //     for (int j = 0; j < tilesZ; j++)
-    //     {
-    //         if (!tiles[i][j])
-    //             continue;
+    for (int i = 0; i < tilesX; i++)
+        for (int j = 0; j < tilesZ; j++)
+        {
+            if (!tiles[i][j])
+                continue;
 
-    //         if (tiles[i][j]->models.size() > 0)
-    //         {
-    //             // std::cout << "Rendering " << tiles[i][j]->models[0]->fileName << std::endl;
-    //             tiles[i][j]->models[0]->draw(view, projection, camera.Position);
-    //         }
-    //     }
+            int n = tiles[i][j]->models.size();
+
+            for (int k = 0, n = tiles[i][j]->models.size(); k < n; k++)
+                tiles[i][j]->models[k]->draw(view, projection, camera.Position, light.showLighting, simple);
+
+            // if (tiles[i][j]->models.size() > 0)
+            // {
+            //     // std::cout << "Rendering " << tiles[i][j]->models[0]->fileName << std::endl;
+            //     for (int k = 0)
+            //     tiles[i][j]->models[0]->draw(view, projection, camera.Position, simple);
+            // }
+        }
 
     glBindVertexArray(0);
 }

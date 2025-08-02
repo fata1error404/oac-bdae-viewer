@@ -1,6 +1,8 @@
 #ifndef _GAME_LOGGER_H_
 #define _GAME_LOGGER_H_
 
+#include <iostream>
+
 // #define MODEL_INFO
 
 template <typename... Args>

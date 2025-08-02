@@ -2,7 +2,7 @@
 #include "terrain.h"
 
 //! Processes a single .trn file and returns a newly created TileTerrain object with the tile's mesh data saved.
-TileTerrain *TileTerrain::loadTileTerrain(IReadResFile *trnFile, int &gridX, int &gridZ, Terrain &terrain)
+TileTerrain *TileTerrain::load(IReadResFile *trnFile, int &gridX, int &gridZ, Terrain &terrain)
 {
     // 2.1. Load .trn file into memory.
     if (!trnFile)
@@ -12,13 +12,12 @@ TileTerrain *TileTerrain::loadTileTerrain(IReadResFile *trnFile, int &gridX, int
 
     trnFile->seek(0);
     int fileSize = (int)trnFile->getSize();
-    unsigned char *buffer = s_loadBuffer;
+    unsigned char *buffer = loadBuffer;
 
     if (fileSize > DEFAULT_LOAD_BUFFER_SIZE)
         buffer = new unsigned char[fileSize];
 
     trnFile->read(buffer, fileSize);
-    trnFile->drop();
 
     /* 2.2. Parse .trn file header. Retrieve:
             – position on the grid
@@ -28,10 +27,10 @@ TileTerrain *TileTerrain::loadTileTerrain(IReadResFile *trnFile, int &gridX, int
     gridX = header->gridX;                           // write extracted grid position to the parent Terrain class
     gridZ = header->gridZ;
 
-    tileTerrain->startX = (float)gridX * UnitsInTile;
-    tileTerrain->startZ = (float)gridZ * UnitsInTile;
+    tileTerrain->startX = (float)gridX * ChunksInTile;
+    tileTerrain->startZ = (float)gridZ * ChunksInTile;
     tileTerrain->BBox.MinEdge = VEC3(tileTerrain->startX, 0, tileTerrain->startZ);
-    tileTerrain->BBox.MaxEdge = VEC3(tileTerrain->startX + UnitsInTile, 0, tileTerrain->startZ + UnitsInTile);
+    tileTerrain->BBox.MaxEdge = VEC3(tileTerrain->startX + ChunksInTile, 0, tileTerrain->startZ + ChunksInTile);
 
     /* 2.3. Parse chunk headers. Retrieve:
             – water level and other metadata about each chunk */
@@ -44,7 +43,7 @@ TileTerrain *TileTerrain::loadTileTerrain(IReadResFile *trnFile, int &gridX, int
 
     // [TODO] annotate, save as a Class variable
     int textureCount;
-    int stringDataOffset = sizeof(TRNFileHeader) + 64 * sizeof(TileChunk) + 7 * ((UnitsInTile + 1) * (UnitsInTile + 1)) + 1;
+    int stringDataOffset = sizeof(TRNFileHeader) + 64 * sizeof(ChunkInfo) + 7 * ((ChunksInTile + 1) * (ChunksInTile + 1)) + 1;
     memcpy(&textureCount, buffer + stringDataOffset, sizeof(int));
 
     // std::cout << "\nTEXTURES: " << textureCount << std::endl;
@@ -89,9 +88,9 @@ TileTerrain *TileTerrain::loadTileTerrain(IReadResFile *trnFile, int &gridX, int
     {
         for (int j = 0; j < ChunksInTileCol; j++, index++)
         {
-            TileChunk *chunk = (TileChunk *)(buffer + chunkOffset); // read the next chunk header
+            ChunkInfo *chunk = (ChunkInfo *)(buffer + chunkOffset); // read the next chunk header
             tileTerrain->chunks[index] = *chunk;                    // copy its data into the tile's chunk array
-            chunkOffset += sizeof(TileChunk);
+            chunkOffset += sizeof(ChunkInfo);
 
             if (tileTerrain->chunks[index].texNameIndex1 != -1)
                 tileTerrain->chunks[index].texNameIndex1 = realTextureIndex[tileTerrain->chunks[index].texNameIndex1];
@@ -147,7 +146,7 @@ TileTerrain *TileTerrain::loadTileTerrain(IReadResFile *trnFile, int &gridX, int
             uint8_t r = (packed >> 16) & 0xFF;
             uint8_t g = (packed >> 8) & 0xFF;
             uint8_t b = (packed >> 0) & 0xFF;
-            tileTerrain->blending[vy][vx] = glm::u8vec4(r, g, b, a);
+            tileTerrain->colors[vy][vx] = glm::u8vec4(r, g, b, a);
 
             // if (vy == 0 && vx == 0)
             // {
@@ -181,8 +180,8 @@ TileTerrain *TileTerrain::loadTileTerrain(IReadResFile *trnFile, int &gridX, int
         }
     }
 
-    if (buffer != s_loadBuffer)
-        delete buffer;
+    if (buffer != loadBuffer)
+        delete[] buffer;
 
     return tileTerrain;
 }

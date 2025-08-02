@@ -94,6 +94,11 @@ inline void loadTileEntities(CZipResReader *itemsArchive, CZipResReader *physics
   {
     const char *fileName = (const char *)(stringData + *(stringData - 1)) + ((i > 0) ? stringData[i - 1] : 0); // retrieve the corresponding resource file name
 
+    // convert to lowercase
+    std::string tmpName = std::string(fileName);
+    for (char &c : tmpName)
+      c = std::tolower(c);
+
     // loop through each entity, filter those that are part of the i-th game object by index, and load them
     for (int j = 0; j < header->entityCount; j++)
     {
@@ -101,6 +106,8 @@ inline void loadTileEntities(CZipResReader *itemsArchive, CZipResReader *physics
         loadEntity(physicsArchive, fileName, entityData[j], tile, VEC3(64.0f * header->gridX, 0, 64.0f * header->gridZ), terrain); // load physics for an entity
     }
   }
+
+  delete[] buffer;
 }
 
 //! Loads physics geometry for a single base entity.
@@ -142,11 +149,11 @@ inline void loadEntity(CZipResReader *physicsArchive, const char *fname, const E
     model = glm::scale(model, glm::vec3(entityInfo.scale.X, entityInfo.scale.Y, entityInfo.scale.Z));
 
     // load .bdae model
-    // Model *bdaeModel = new Model();
-    // bdaeModel->load(fname, model);
+    Model *bdaeModel = new Model();
+    bdaeModel->load(fname, model);
 
-    // if (bdaeModel->modelLoaded)
-    //   tile->models.push_back(bdaeModel);
+    if (bdaeModel->modelLoaded)
+      tile->models.push_back(bdaeModel);
 
     break;
   }

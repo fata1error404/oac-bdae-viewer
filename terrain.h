@@ -46,6 +46,10 @@ public:
         : shader("shader terrain.vs", "shader terrain.fs"),
           camera(cam),
           light(light),
+          trnVAO(0),
+          trnVBO(0),
+          phyVAO(0),
+          phyVBO(0),
           tileMinX(-1),
           tileMinZ(-1),
           tileMaxX(1),
@@ -59,6 +63,8 @@ public:
         shader.setFloat("specularStrength", specularStrength);
     };
 
+    ~Terrain() { reset(); }
+
     //! Loads .zip file from disk, performs parsing for each contained .trn file, sets up terrain mesh data and sound.
     void load(const char *fpath, Sound &sound);
 
@@ -69,7 +75,7 @@ public:
     void reset();
 
     //! Renders terrain and physics geometry meshes.
-    void draw(glm::mat4 view, glm::mat4 projection);
+    void draw(glm::mat4 view, glm::mat4 projection, bool simple);
 };
 
 #endif

@@ -20,10 +20,11 @@ public:
     PhysicsRefMesh(int nVertex, float *fVertex, int nFaces, unsigned short *facePtr)
         : ReferenceCounter(1), m_vertex(fVertex), m_nbVertex(nVertex), m_nbFaces(nFaces), m_faces(facePtr) {}
 
-    ~PhysicsRefMesh() {
-        // SAFE_DEL_ARRAY(m_vertex);
-        // SAFE_DEL_ARRAY(m_faces);
-    };
+    ~PhysicsRefMesh()
+    {
+        delete[] m_vertex;
+        delete[] m_faces;
+    }
 
     void grab() const
     {
@@ -120,108 +121,96 @@ public:
           m_halfSize(halfW, halfH, halfL),
           m_geomType(type),
           m_pNext(NULL),
-          m_pTrigger(NULL) {};
+          m_pTrigger(NULL),
+          m_refMesh(NULL) {};
+
+    ~Physics()
+    {
+        if (m_refMesh)
+        {
+            m_refMesh->drop();
+        }
+
+        if (m_pNext)
+            delete m_pNext;
+
+        if (m_pTrigger)
+            delete m_pNext;
+    }
 
     //!
     static Physics *load(CZipResReader *archive, const char *fname, bool isEntityHouse)
     {
-        // change '.bdae' to '.phy' (a 3D model has its physics geometry located by the same relative path in the physics archive)
         std::string tmpName = std::string(fname).replace(std::strlen(fname) - 5, 5, ".phy");
 
-        // convert to lowercase
-        for (char &c : tmpName)
-            c = std::tolower(c);
-
         IReadResFile *phyFile = archive->openFile(tmpName.c_str());
-
         if (!phyFile)
-            return NULL;
+            return nullptr;
 
-        // [TODO] implement multithreading
         phyFile->seek(0);
-        int fileSize = (int)phyFile->getSize();
+        int fileSize = static_cast<int>(phyFile->getSize());
         unsigned char *buffer = new unsigned char[fileSize];
         phyFile->read(buffer, fileSize);
         phyFile->drop();
 
         int nbMesh;
-        memcpy(&nbMesh, buffer, sizeof(int));
+        std::memcpy(&nbMesh, buffer, sizeof(int));
 
-        // std::cout << "meshes  " << nbMesh << "  | " << tmpName << std::endl;
+        Physics *head = nullptr;
+        Physics *tail = nullptr;
 
-        Physics *tmpGeom = NULL;
-
-        for (int i = 0; i < nbMesh; i++)
+        for (int i = 0; i < nbMesh; ++i)
         {
             int type;
-            memcpy(&type, buffer + 4, sizeof(int));
+            std::memcpy(&type, buffer + 4, sizeof(int));
+            Physics *node = nullptr;
 
             if (type == PHYSICS_GEOM_TYPE_MESH)
             {
-                tmpGeom = new Physics();
-
-                if (!tmpGeom)
-                    return NULL;
-
-                tmpGeom->loadMesh(buffer);
-
-                // std::cout << "MESH: " << tmpGeom->m_refMesh->m_nbVertex << std::endl;
-
-                // --- DEBUG OUTPUT ---
-                // std::cout << "\n=== Physics Mesh Debug ===\n";
-                // std::cout << "m_pos:       ("
-                //           << tmpGeom->m_pos.X << ", "
-                //           << tmpGeom->m_pos.Y << ", "
-                //           << tmpGeom->m_pos.Z << ")\n";
-                // std::cout << "m_halfSize:  ("
-                //           << tmpGeom->m_halfSize.X << ", "
-                //           << tmpGeom->m_halfSize.Y << ", "
-                //           << tmpGeom->m_halfSize.Z << ")\n";
-                // std::cout << "m_rotY:      " << tmpGeom->m_rotY << "\n";
-                // std::cout << "m_geomType:  " << tmpGeom->m_geomType << "\n";
-
-                if (tmpGeom->m_refMesh->m_nbVertex == 16 && tmpGeom->m_refMesh->m_nbFaces == 26)
-                {
-                    // auto *rm = tmpGeom->m_refMesh;
-                    // std::cout << "\n--- RefMesh ---\n";
-                    // std::cout << "  m_nbVertex: " << rm->m_nbVertex << "\n";
-                    // std::cout << "  m_nbFaces:  " << rm->m_nbFaces << "\n";
-
-                    // std::cout << "  First 5 vertices:\n";
-                    // for (int i = 0; i < std::min(rm->m_nbVertex, 5); ++i)
-                    // {
-                    //     float *v = rm->m_vertex + i * 3;
-                    //     std::cout << "    [" << i << "]: ("
-                    //               << v[0] << ", "
-                    //               << v[1] << ", "
-                    //               << v[2] << ")\n";
-                    // }
-
-                    return tmpGeom;
-                }
+                node = new Physics();
+                node->loadMesh(buffer);
             }
             else
             {
-                PHYFileHeader *header = (PHYFileHeader *)buffer;
+                PHYFileHeader header;
+                std::memcpy(&header, buffer, sizeof(PHYFileHeader));
+                VEC3 pos(header.transX, header.transY, header.transZ);
+                float ry = header.rotY;
+                float hx = header.halfSizeX;
+                float hy = header.halfSizeY;
+                float hz = header.halfSizeZ;
 
                 switch (type)
                 {
                 case PHYSICS_GEOM_TYPE_PLANE:
-                    tmpGeom = new Physics(VEC3(header->transX, header->transY, header->transZ), header->rotY, header->halfSizeX, header->halfSizeY, 0, 2);
+                    node = new Physics(pos, ry, hx, hy, 0.0f, PHYSICS_GEOM_TYPE_PLANE);
                     break;
                 case PHYSICS_GEOM_TYPE_BOX:
-                    tmpGeom = new Physics(VEC3(header->transX, header->transY, header->transZ), header->rotY, header->halfSizeX, header->halfSizeY, header->halfSizeZ, 3);
+                    node = new Physics(pos, ry, hx, hy, hz, PHYSICS_GEOM_TYPE_BOX);
                     break;
                 case PHYSICS_GEOM_TYPE_CYLINDER:
-                    tmpGeom = new Physics(VEC3(header->transX, header->transY, header->transZ), 0, header->halfSizeX, header->halfSizeY, header->halfSizeZ, 4);
+                    node = new Physics(pos, 0.0f, hx, hy, hz, PHYSICS_GEOM_TYPE_CYLINDER);
                     break;
                 default:
-                    std::cout << "Physics Geometry type " << type << " error" << std::endl;
+                    std::cout << "Unknown Physics geom type " << type << std::endl;
+                    break;
                 }
+            }
+
+            if (!node)
+                continue;
+
+            if (!head)
+                head = tail = node;
+            else
+            {
+                tail->m_pNext = node;
+                tail = node;
             }
         }
 
-        return tmpGeom;
+        delete[] buffer;
+        return head;
     }
 
     void loadMesh(unsigned char *buffer)
@@ -277,7 +266,7 @@ public:
             if (!faces)
             {
                 std::cout << "SHOULDN'T BE HERE" << std::endl;
-                // SAFE_DEL_ARRAY(vertex);
+                delete[] vertex;
                 return;
             }
 

@@ -1,25 +1,18 @@
 #ifndef PARSER_TRN_H
 #define PARSER_TRN_H
 
-#include "CZipResReader.h"
+#include <vector>
+#include "libs/glm/glm.hpp"
 #include "AABB.h"
-#include "VEC3.h"
 #include "Quaternion.h"
+#include "terrain.h"
+#include "CZipResReader.h"
 #include "parserBDAE.h"
 #include "parserPHY.h"
-#include "libs/glm/glm.hpp"
-#include "libs/glm/fwd.hpp"
-#include "libs/glm/gtc/type_ptr.hpp"
-#include "libs/glm/gtc/constants.hpp"
-#include "libs/glm/gtc/packing.hpp"
-#include "libs/glm/ext/vector_uint4.hpp"
-#include "libs/glm/gtc/type_precision.hpp"
-#include "libs/glm/gtc/matrix_transform.hpp"
 
-class IReadResFile;
-class Terrain;
+// 1 tile = 8 × 8 chunks = 64 × 64 units
 
-#define UnitsInTile (8 * 8)
+#define ChunksInTile (8 * 8)
 #define ChunksInTileRow 8
 #define ChunksInTileCol 8
 #define UnitsInTileRow 64
@@ -27,59 +20,69 @@ class Terrain;
 
 #define DEFAULT_LOAD_BUFFER_SIZE 102400 // 100 KB
 
-static unsigned char s_loadBuffer[DEFAULT_LOAD_BUFFER_SIZE];
+static unsigned char loadBuffer[DEFAULT_LOAD_BUFFER_SIZE]; // static read buffer to load .trn files into memory without dynamic allocation
 
-//
+// 24 bytes
 struct TRNFileHeader
 {
-    char Signature[4];    // 4 bytes  signature
-    unsigned int Version; // 4 bytes  format version
-    int gridX;            // 4 bytes  X-axis grid position
-    int gridZ;            // 4 bytes  Z-axis grid position
-    unsigned int flag;    // 4 bytes  explain
-    short waterTexID;     // 2 bytes  explain
-    short liquidType;     // 2 bytes  explain
+    char signature[4];       // 4 bytes  file signature – 'ATIL' for .trn file
+    unsigned int version;    // 4 bytes  format version
+    int gridX;               // 4 bytes  X-axis grid position
+    int gridZ;               // 4 bytes  Z-axis grid position
+    unsigned int flag;       // 4 bytes  mask layers detector (bitmask)
+    short waterTexNameIndex; // 2 bytes  index of water texture (where (?))
+    short liquidType;        // 2 bytes  liquid type: water = 0 | magma = 1 | death = 2
 };
 
-//
-struct TileChunk
+// 12 bytes, repeated ChunksInTileRow x ChunksInTileCol = 64 times
+struct ChunkInfo
 {
-    unsigned int flag;
-    short waterLevel;
-    short texNameIndex1;
-    short texNameIndex2;
-    short texNameIndex3;
+    unsigned int flag;   // 4 bytes  water flag (?)
+    short waterLevel;    // 2 bytes  water plane height
+    short texNameIndex1; // 2 bytes  index into texture list in the string data section
+    short texNameIndex2; // 2 bytes  ..
+    short texNameIndex3; // 2 bytes  ..
 };
 
 // Class for loading terrain tiles.
-// ________________________________
+// ______________________________________
 
 class TileTerrain
 {
 public:
-    float startX, startZ;                      // tile's position on the grid in world space coordinates
-    float Y[UnitsInTile + 1][UnitsInTile + 1]; // tile's height map (unscaled)
-    AABB BBox;                                 // tile's bounding box
-    std::vector<Physics *> physicsGeometry;
-    std::vector<Model *> models;
+    float startX, startZ;                            // position on the grid in world space coordinates
+    float Y[UnitsInTileRow + 1][UnitsInTileCol + 1]; // height map (unscaled)
+    AABB BBox;                                       // bounding box
+    std::vector<Physics *> physicsGeometry;          // .phy models
+    std::vector<Model *> models;                     // .bdae models
 
-    TileChunk chunks[UnitsInTile];
-    glm::u8vec4 blending[UnitsInTile + 1][UnitsInTile + 1];
-    glm::vec3 normals[UnitsInTile + 1][UnitsInTile + 1];
+    ChunkInfo chunks[ChunksInTile];
+    glm::u8vec4 colors[UnitsInTileRow + 1][UnitsInTileCol + 1]; // vertex colors
+    glm::vec3 normals[UnitsInTileRow + 1][UnitsInTileCol + 1];  // normal vectors
 
     TileTerrain()
+        : startX(0),
+          startZ(0)
     {
-        startX = 0;
-        startZ = 0;
-
         memset(&chunks, 0, sizeof(chunks));
         memset(&Y, 0, sizeof(Y));
     };
 
-    //! Processes a single .trn file and returns a newly created TileTerrain object with the tile's mesh data saved.
-    static TileTerrain *loadTileTerrain(IReadResFile *trnFile, int &gridX, int &gridZ, Terrain &terrain);
-};
+    ~TileTerrain()
+    {
+        for (Physics *p : physicsGeometry)
+            delete p;
 
-#include "parserITM.h"
+        physicsGeometry.clear();
+
+        for (Model *m : models)
+            delete m;
+
+        models.clear();
+    }
+
+    //! Processes a single .trn file and returns a newly created TileTerrain object with the tile's mesh data saved.
+    static TileTerrain *load(IReadResFile *trnFile, int &gridX, int &gridZ, Terrain &terrain);
+};
 
 #endif

@@ -63,7 +63,7 @@ double lastY = DEFAULT_WINDOW_HEIGHT / 2.0; // starting cursor position (y-axis)
 bool fileDialogOpen = false;       // flag that indicates whether to block all background inputs (when the file browsing dialog is open)
 bool settingsPanelHovered = false; // flag that indicated whether to block background mouse input (when interacting with the settings panel)
 bool displayBaseMesh = false;      // flag that indicates base / textured mesh display mode
-bool isTerrainViewer = true;
+bool isTerrainViewer = false;
 
 int main()
 {
@@ -214,6 +214,7 @@ int main()
         {
             isTerrainViewer ? terrainModel.reset() : bdaeModel.reset();
             isTerrainViewer = !isTerrainViewer;
+            cfg.path = isTerrainViewer ? "./data/terrain" : "./data/model";
             ma_sound_stop(&ourSound.sound);
         }
 
@@ -311,7 +312,7 @@ int main()
             ourLight.draw(view, projection); // render light cube
         }
         else
-            terrainModel.draw(view, projection); // render terrain
+            terrainModel.draw(view, projection, displayBaseMesh); // render terrain
 
         // render settings panel (and file browsing dialog, if open)
         ImGui::Render();

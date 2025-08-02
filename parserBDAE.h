@@ -34,7 +34,10 @@ public:
 
     Model()
         : shader("shader model.vs", "shader model.fs"),
-          modelLoaded(false)
+          VAO(0),
+          VBO(0),
+          modelLoaded(false),
+          meshCenter(glm::vec3(-1.0f))
     {
         shader.use();
         shader.setVec3("lightPos", lightPos);
@@ -55,8 +58,6 @@ public:
 
     //! Renders .bdae model.
     void draw(glm::mat4 view, glm::mat4 projection, glm::vec3 cameraPos, bool lighting, bool simple);
-
-    void draw(glm::mat4 view, glm::mat4 projection, glm::vec3 cameraPos);
 };
 
 #endif
