@@ -18,3 +18,5 @@ zip_models.sh
 README.pdf
 
 aux_docs/mesa.supp
+
+little_endian_not_quantized.bdae

@@ -3,7 +3,7 @@
 
 #include <iostream>
 
-// #define MODEL_INFO
+#define MODEL_INFO
 
 template <typename... Args>
 inline void LOG(Args &&...args)

@@ -5,8 +5,7 @@ HEADER_DIRS = -Ilibs/oac \
     	  	  -Ilibs/oac/framework \
 		  	  -Ilibs/oac/io
 
-SOURCE_FILES = resFile.cpp \
-			   terrain.cpp \
+SOURCE_FILES = terrain.cpp \
 			   parserBDAE.cpp \
 			   parserTRN.cpp \
 		       libs/glad/glad.c \
@@ -25,7 +24,7 @@ OS = $(shell uname -s)
 
 ifeq ($(OS),Linux)
 # Linux build
-app: main.cpp $(SOURCE_FILES)
+app: clean main.cpp $(SOURCE_FILES)
 	g++ main.cpp $(HEADER_DIRS) $(SOURCE_FILES) -o $(TARGET) libs/oac/io/libio_linux.a -lglfw
 else
 # Windows build

@@ -1,5 +1,6 @@
 #include "terrain.h"
 #include <filesystem>
+#include <array>
 #include "libs/stb_image.h"
 #include "Logger.h"
 #include "parserTRN.h"
