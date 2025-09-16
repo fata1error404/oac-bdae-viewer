@@ -10,6 +10,15 @@
 #include "sound.h"
 #include "light.h"
 
+// if defined, viewer works with .bdae version from oac 1.0.3; if undefined, with oac 4.2.5
+// #define BETA_GAME_VERSION
+
+#ifdef BETA_GAME_VERSION
+typedef uint32_t BDAEint;
+#else
+typedef uint64_t BDAEint;
+#endif
+
 const float meshRotationSensitivity = 0.3f;
 
 // 80 bytes
@@ -22,11 +31,11 @@ struct BDAEFileHeader
 	unsigned int sizeOfFile;								// 4 bytes  file size in bytes
 	unsigned int numOffsets;								// 4 bytes  number of entries in the offset table
 	unsigned int origin;									// 4 bytes  file origin – always '0' for standalone .bdae files (?)
-	uint64_t offsetOffsetTable;								// 8 bytes  offset to Offset Data section (in bytes, from the beginning of the file) – should be 80
-	uint64_t offsetStringTable;								// 8 bytes  offset to String Data section
-	uint64_t offsetData;									// 8 bytes  offset to Data section
-	uint64_t offsetRelatedFiles;							// 8 bytes  offset to related file names (?)
-	uint64_t offsetRemovable;								// 8 bytes  offset to Removable section
+	BDAEint offsetOffsetTable;								// 8 bytes  offset to Offset Data section (in bytes, from the beginning of the file) – should be 80
+	BDAEint offsetStringTable;								// 8 bytes  offset to String Data section
+	BDAEint offsetData;										// 8 bytes  offset to Data section
+	BDAEint offsetRelatedFiles;								// 8 bytes  offset to related file names (?)
+	BDAEint offsetRemovable;								// 8 bytes  offset to Removable section
 	unsigned int sizeOfRemovable;							// 4 bytes  size of Removable section in bytes
 	unsigned int numRemovableChunks;						// 4 bytes  number of removable chunks
 	unsigned int useSeparatedAllocationForRemovableBuffers; // 4 bytes  1: each removable chunk is loaded into its own separately allocated buffer, 0: all chunks in one shared buffer

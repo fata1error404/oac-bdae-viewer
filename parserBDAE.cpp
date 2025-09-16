@@ -49,7 +49,7 @@ int Model::init(IReadResFile *file)
 	unsigned int sizeStringTable;
 	unsigned int sizeUnRemovable;
 
-	sizeOffsetTable = header->numOffsets * sizeof(uint64_t);
+	sizeOffsetTable = header->numOffsets * sizeof(BDAEint);
 	sizeStringTable = header->offsetData - header->offsetStringTable;
 	sizeUnRemovable = fileSize - sizeOffsetTable - sizeStringTable - header->sizeOfDynamic;
 
@@ -110,7 +110,13 @@ int Model::init(IReadResFile *file)
 
 	// 5. parse data section: retrieve mesh info
 	int meshCount, meshInfoOffset;
-	char *ptr = DataBuffer + sizeof(BDAEFileHeader) + 120; // points to mesh info in the Data section
+
+#ifdef BETA_GAME_VERSION
+	char *ptr = DataBuffer + sizeof(BDAEFileHeader) + 100; // points to mesh info in the Data section
+#else
+	char *ptr = DataBuffer + sizeof(BDAEFileHeader) + 120;
+#endif
+
 	memcpy(&meshCount, ptr, sizeof(int));
 	memcpy(&meshInfoOffset, ptr + 4, sizeof(int));
 
@@ -127,20 +133,36 @@ int Model::init(IReadResFile *file)
 
 	for (int i = 0; i < meshCount; i++)
 	{
+#ifdef BETA_GAME_VERSION
+		memcpy(&meshMetadataOffset[i], DataBuffer + (meshInfoOffset - sizeOffsetTable - sizeStringTable + 12) + i * 16, sizeof(int));
+		memcpy(&meshVertexCount[i], DataBuffer + (meshMetadataOffset[i] - sizeOffsetTable - sizeStringTable + 4), sizeof(int));
+		memcpy(&submeshCount[i], DataBuffer + (meshMetadataOffset[i] - sizeOffsetTable - sizeStringTable + 12), sizeof(int));
+		memcpy(&submeshMetadataOffset[i], DataBuffer + (meshMetadataOffset[i] - sizeOffsetTable - sizeStringTable + 16), sizeof(int));
+		memcpy(&bytesPerVertex[i], DataBuffer + (meshMetadataOffset[i] - sizeOffsetTable - sizeStringTable + 44), sizeof(int));
+		memcpy(&meshVertexDataOffset[i], DataBuffer + (meshMetadataOffset[i] - sizeOffsetTable - sizeStringTable + 80), sizeof(int));
+#else
 		memcpy(&meshMetadataOffset[i], ptr + 4 + meshInfoOffset + 20 + i * 24, sizeof(int));
 		memcpy(&meshVertexCount[i], ptr + 4 + meshInfoOffset + 20 + i * 24 + meshMetadataOffset[i] + 4, sizeof(int));
 		memcpy(&submeshCount[i], ptr + 4 + meshInfoOffset + 20 + i * 24 + meshMetadataOffset[i] + 12, sizeof(int));
 		memcpy(&submeshMetadataOffset[i], ptr + 4 + meshInfoOffset + 20 + i * 24 + meshMetadataOffset[i] + 16, sizeof(int));
 		memcpy(&bytesPerVertex[i], ptr + 4 + meshInfoOffset + 20 + i * 24 + meshMetadataOffset[i] + 48, sizeof(int));
 		memcpy(&meshVertexDataOffset[i], ptr + 4 + meshInfoOffset + 20 + i * 24 + meshMetadataOffset[i] + 88, sizeof(int));
+#endif
 
 		LOG("[", i + 1, "]  ", meshVertexCount[i], " vertices, ", submeshCount[i], " submeshes");
 
 		for (int k = 0; k < submeshCount[i]; k++)
 		{
 			int val1, val2;
+
+#ifdef BETA_GAME_VERSION
+			memcpy(&val1, DataBuffer + (submeshMetadataOffset[i] - sizeOffsetTable - sizeStringTable + 40) + k * 56, sizeof(int));
+			memcpy(&val2, DataBuffer + (submeshMetadataOffset[i] - sizeOffsetTable - sizeStringTable + 44) + k * 56, sizeof(int));
+#else
 			memcpy(&val1, ptr + 4 + meshInfoOffset + 20 + i * 24 + meshMetadataOffset[i] + 16 + submeshMetadataOffset[i] + k * 80 + 48, sizeof(int));
 			memcpy(&val2, ptr + 4 + meshInfoOffset + 20 + i * 24 + meshMetadataOffset[i] + 16 + submeshMetadataOffset[i] + k * 80 + 56, sizeof(int));
+#endif
+
 			submeshTriangleCount[i].push_back(val1 / 3);
 			submeshIndexDataOffset[i].push_back(val2);
 		}
