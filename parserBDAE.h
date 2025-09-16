@@ -11,7 +11,7 @@
 #include "light.h"
 
 // if defined, viewer works with .bdae version from oac 1.0.3; if undefined, with oac 4.2.5
-// #define BETA_GAME_VERSION
+#define BETA_GAME_VERSION
 
 #ifdef BETA_GAME_VERSION
 typedef uint32_t BDAEint;
@@ -50,6 +50,8 @@ class Model
   public:
 	Shader shader;
 	std::string fileName;
+	std::vector<std::string> textureNames;
+	std::vector<int> submeshTextureIndex;
 	int fileSize, vertexCount, faceCount, textureCount, alternativeTextureCount, selectedTexture, totalSubmeshCount;
 	unsigned int VAO, VBO;
 	std::vector<unsigned int> EBOs;
@@ -64,13 +66,13 @@ class Model
 	float meshYaw = 0.0f;
 	bool modelLoaded;
 
-	char *DataBuffer;						// raw binary header, data and removable sections
-	std::vector<std::string> StringStorage; // strings from string data section
+	char *DataBuffer; // raw binary content of .bdae file
 
 	Model()
 		: shader("shaders/model.vs", "shaders/model.fs"),
 		  VAO(0),
 		  VBO(0),
+		  totalSubmeshCount(0),
 		  modelLoaded(false),
 		  meshCenter(glm::vec3(-1.0f)),
 		  DataBuffer(NULL)
@@ -86,11 +88,8 @@ class Model
 	//! Parses .bdae file and sets up model mesh data.
 	int init(IReadResFile *file);
 
-	//! For 3D Model Viewer. Loads .bdae file from disk, calls the parser and sets up model textures and sounds.
-	void load(const char *fpath, Sound &sound);
-
-	//! For Terrain Viewer. Loads .bdae file from disk, performs in-memory initialization and parsing, sets up model mesh data and textures (does not search for associated textures and sounds).
-	void load(const char *fpath, glm::mat4 model);
+	//! Loads .bdae file from disk, calls the parser and sets up model textures and sounds.
+	void load(const char *fpath, glm::mat4 modelMatrix, Sound &sound, bool isTerrainViewer);
 
 	//! Clears GPU memory and resets viewer state.
 	void reset();
