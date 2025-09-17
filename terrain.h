@@ -14,6 +14,8 @@
 #include "libs/glm/gtc/packing.hpp"
 #include "libs/glm/ext/vector_uint4.hpp"
 #include "libs/glm/gtc/type_precision.hpp"
+#include "CZipResReader.h"
+#include "DetourNavMesh.h"
 
 class TileTerrain;
 
@@ -28,8 +30,8 @@ class Terrain
 	Light &light;
 	std::string fileName;
 	int fileSize, vertexCount, faceCount, modelCount;
-	unsigned int trnVAO, trnVBO, phyVAO, phyVBO;
-	std::vector<float> terrainVertices, physicsVertices;
+	unsigned int trnVAO, trnVBO, navVAO, navVBO, phyVAO, phyVBO;
+	std::vector<float> terrainVertices, navigationVertices, physicsVertices;
 	std::vector<std::string> textureNames;
 	unsigned int textureMap;
 	std::vector<std::string> sounds;
@@ -40,7 +42,10 @@ class Terrain
 	int tilesX, tilesZ;							   // terrain size in tiles
 	bool terrainLoaded;
 
-	int fillCount; // NEW
+	dtNavMesh *navMesh;
+
+	int fillCount;		   // [NEW]
+	int navTriVertexCount; // [NEW]
 
 	Terrain(Camera &cam, Light &light)
 		: shader("shaders/terrain.vs", "shaders/terrain.fs"),
@@ -48,13 +53,17 @@ class Terrain
 		  light(light),
 		  trnVAO(0),
 		  trnVBO(0),
+		  navVAO(0),
+		  navVBO(0),
 		  phyVAO(0),
 		  phyVBO(0),
 		  tileMinX(-1),
 		  tileMinZ(-1),
 		  tileMaxX(1),
 		  tileMaxZ(1),
-		  terrainLoaded(false)
+		  terrainLoaded(false),
+		  navMesh(NULL),
+		  navTriVertexCount(0)
 	{
 		shader.use();
 		shader.setVec3("lightColor", lightColor);
@@ -68,14 +77,17 @@ class Terrain
 	//! Loads .zip file from disk, performs parsing for each contained .trn file, sets up terrain mesh data and sound.
 	void load(const char *fpath, Sound &sound);
 
-	//! [TODO] merge with load
-	void getEntitiesVertices(int &outFillVertexCount);
+	void buildNavigationVertices();
+
+	void buildPhysicsVertices();
+
+	void loadTileNavigation(CZipResReader *navigationArchive, int gridX, int gridZ);
 
 	//! Clears GPU memory and resets viewer state.
 	void reset();
 
 	//! Renders terrain and physics geometry meshes.
-	void draw(glm::mat4 view, glm::mat4 projection, bool simple);
+	void draw(glm::mat4 view, glm::mat4 projection, bool simple, bool renderNavMesh);
 };
 
 #endif

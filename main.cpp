@@ -63,6 +63,7 @@ double lastY = DEFAULT_WINDOW_HEIGHT / 2.0; // starting cursor position (y-axis)
 bool fileDialogOpen = false;	   // flag that indicates whether to block all background inputs (when the file browsing dialog is open)
 bool settingsPanelHovered = false; // flag that indicated whether to block background mouse input (when interacting with the settings panel)
 bool displayBaseMesh = false;	   // flag that indicates base / textured mesh display mode
+bool displayNavMesh = false;	   // flag that indicates whether to show walkable areas
 bool isTerrainViewer = true;
 
 int main()
@@ -283,6 +284,8 @@ int main()
 			ImGui::NewLine();
 			ImGui::Checkbox("Base Mesh On/Off", &displayBaseMesh);
 			ImGui::Spacing();
+			ImGui::Checkbox("Walkable Areas On/Off", &displayNavMesh);
+			ImGui::Spacing();
 			ImGui::Checkbox("Lighting On/Off", &ourLight.showLighting);
 			ImGui::NewLine();
 			ImGui::TextWrapped("Terrain: %d x %d tiles", terrainModel.tilesX, terrainModel.tilesZ);
@@ -317,7 +320,7 @@ int main()
 			ourLight.draw(view, projection); // render light cube
 		}
 		else
-			terrainModel.draw(view, projection, displayBaseMesh); // render terrain
+			terrainModel.draw(view, projection, displayBaseMesh, displayNavMesh); // render terrain
 
 		// render settings panel (and file browsing dialog, if open)
 		ImGui::Render();
@@ -401,6 +404,9 @@ void key_callback(GLFWwindow *window, int key, int scancode, int action, int mod
 			break;
 		case GLFW_KEY_L:
 			ctx->light->showLighting = !ctx->light->showLighting;
+			break;
+		case GLFW_KEY_N:
+			displayNavMesh = !displayNavMesh;
 			break;
 		case GLFW_KEY_F:
 		{

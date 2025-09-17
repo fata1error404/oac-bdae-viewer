@@ -106,4 +106,6 @@ void main()
     }
     else if (renderMode == 4)
         FragColor = vec4(0.73f, 0.58f, 0.40f, 0.9f);
+    else if (renderMode == 5)
+        FragColor = vec4(0.59f, 0.29f, 0.0f, 0.5f); // brown with alpha
 }

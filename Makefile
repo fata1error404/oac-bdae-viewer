@@ -3,7 +3,8 @@ TARGET = app
 HEADER_DIRS = -Ilibs/oac \
 		  	  -Ilibs/oac/base \
     	  	  -Ilibs/oac/framework \
-		  	  -Ilibs/oac/io
+		  	  -Ilibs/oac/io \
+			  -Ilibs/oac/navmesh
 
 SOURCE_FILES = terrain.cpp \
 			   parserBDAE.cpp \
@@ -18,6 +19,9 @@ SOURCE_FILES = terrain.cpp \
 		  	   libs/imgui/ImGuiFileDialog.cpp \
 		  	   libs/oac/base/Mutex.cpp \
 			   libs/oac/framework/OS.cpp \
+			   libs/oac/navmesh/DetourCommon.cpp \
+			   libs/oac/navmesh/DetourNavMesh.cpp \
+			   libs/oac/navmesh/DetourNode.cpp \
 			   libs/lib_impl.cpp
 
 OS = $(shell uname -s)

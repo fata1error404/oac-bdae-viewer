@@ -33,7 +33,11 @@ void Terrain::load(const char *fpath, Sound &sound)
 
 	CZipResReader *itemsArchive = new CZipResReader(std::string(fpath).replace(std::strlen(fpath) - 4, 4, ".itm").c_str(), true, false);
 
+	CZipResReader *navigationArchive = new CZipResReader(std::string(fpath).replace(std::strlen(fpath) - 4, 4, ".nav").c_str(), true, false);
+
 	CZipResReader *physicsArchive = new CZipResReader("data/terrain/physics.zip", true, false);
+
+	navMesh = new dtNavMesh();
 
 	for (int i = 0, n = terrainArchive->getFileCount(); i < n; i++)
 	{
@@ -44,6 +48,7 @@ void Terrain::load(const char *fpath, Sound &sound)
 			int tileX, tileZ;													 // variables that will be assigned tile's position on the grid
 			TileTerrain *tile = TileTerrain::load(trnFile, tileX, tileZ, *this); // .trn: load tile's terrain mesh data
 			loadTileEntities(itemsArchive, physicsArchive, tileX, tileZ, tile, *this);
+			loadTileNavigation(navigationArchive, tileX, tileZ);
 
 			if (tile)
 			{
@@ -66,6 +71,7 @@ void Terrain::load(const char *fpath, Sound &sound)
 
 	delete terrainArchive;
 	delete itemsArchive;
+	delete navigationArchive;
 	delete physicsArchive;
 
 	/* 2. initialize Class variables inside the Terrain object
@@ -261,15 +267,8 @@ void Terrain::load(const char *fpath, Sound &sound)
 			stbi_image_free(ptr);
 
 	// 5. build the physics mesh vertex data in world space coordinates
-	getEntitiesVertices(fillCount);
-
-	glGenVertexArrays(1, &phyVAO);
-	glGenBuffers(1, &phyVBO);
-	glBindVertexArray(phyVAO);
-	glBindBuffer(GL_ARRAY_BUFFER, phyVBO);
-	glBufferData(GL_ARRAY_BUFFER, physicsVertices.size() * sizeof(float), physicsVertices.data(), GL_STATIC_DRAW);
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
-	glEnableVertexAttribArray(0);
+	buildNavigationVertices();
+	buildPhysicsVertices();
 
 	// set file info to be displayed in the settings panel
 	fileName = std::filesystem::path(fpath).filename().string();
@@ -287,10 +286,224 @@ void Terrain::load(const char *fpath, Sound &sound)
 	terrainLoaded = true;
 }
 
-//! Returns a single vector partitioned into [0…fillVerts) = triangles, [fillVerts…end) = lines.
-void Terrain::getEntitiesVertices(int &outFillVertexCount)
+// Load Nav Mesh if exists
+void Terrain::loadTileNavigation(CZipResReader *navigationArchive, int gridX, int gridZ)
 {
-	std::vector<float> allVertices;
+	char tmpName[256];
+
+#ifdef BETA_GAME_VERSION
+	std::string terrainName = std::filesystem::path(navigationArchive->getZipFileName()).stem().string();
+	sprintf(tmpName, "world/%s/navmesh/%04d_%04d.nav", terrainName.c_str(), gridX, gridZ); // path inside the .nav archive
+#else
+	sprintf(tmpName, "navmesh/%04d_%04d.nav", gridX, gridZ); // [TODO] test!
+#endif
+
+	IReadResFile *navFile = navigationArchive->openFile(tmpName);
+
+	if (!navFile)
+		return;
+
+	navFile->seek(0);
+	int fileSize = navFile->getSize();
+	unsigned char *buffer = new unsigned char[fileSize];
+	navFile->read(buffer, fileSize);
+	navFile->drop();
+
+	int tileRef = navMesh->addTile(buffer, fileSize, DT_TILE_FREE_DATA, 0); // register in navigation system, granting Detour in-memory ownership (buffer will be freed automatically when the tile is destroyed)
+}
+
+// [TODO] annotate
+#include <unordered_map>
+#include <string>
+#include <tuple>
+#include <cstdint>
+#include <cmath>
+#include <sstream>
+
+// Helper: quantize a coordinate to integer to avoid tiny floating differences.
+static inline long long quantizeCoord(float v, float scale = 1000.0f)
+{
+	return llround(v * scale);
+}
+
+// Make a canonical undirected edge key based on quantized endpoints.
+static inline std::string makeEdgeKeyQ(float ax, float ay, float az, float bx, float by, float bz, float scale = 1000.0f)
+{
+	long long a0 = quantizeCoord(ax, scale);
+	long long a1 = quantizeCoord(ay, scale);
+	long long a2 = quantizeCoord(az, scale);
+	long long b0 = quantizeCoord(bx, scale);
+	long long b1 = quantizeCoord(by, scale);
+	long long b2 = quantizeCoord(bz, scale);
+
+	// lexicographically order the endpoints so key is undirected
+	if (std::tie(a0, a1, a2) <= std::tie(b0, b1, b2))
+	{
+		std::ostringstream ss;
+		ss << a0 << ':' << a1 << ':' << a2 << '|' << b0 << ':' << b1 << ':' << b2;
+		return ss.str();
+	}
+	else
+	{
+		std::ostringstream ss;
+		ss << b0 << ':' << b1 << ':' << b2 << '|' << a0 << ':' << a1 << ':' << a2;
+		return ss.str();
+	}
+}
+
+struct EdgeInfo
+{
+	int count = 0;		   // how many times the undirected edge was seen
+	int area = -1;		   // area id of the first polygon that inserted this edge
+	bool diffArea = false; // true if an insertion with a different area occurred
+	float ax, ay, az;	   // original floating endpoints (first seen)
+	float bx, by, bz;
+};
+
+void Terrain::buildNavigationVertices()
+{
+	navigationVertices.clear();
+	navTriVertexCount = 0;
+
+	if (!navMesh)
+		return;
+
+	const int maxTiles = navMesh->getMaxTiles();
+
+	// vertical offset to raise navmesh above ground
+	const float navMeshOffset = 1.0f;
+
+	std::unordered_map<std::string, EdgeInfo> edgeMap;
+	edgeMap.reserve(4096);
+
+	int triVertexCounter = 0;
+
+	// Scan tiles/polys: append triangles (with vertical offset) and collect edges into edgeMap (keys use original coords)
+	for (int ti = 0; ti < maxTiles; ++ti)
+	{
+		dtMeshTile *tile = navMesh->getTile(ti);
+		if (!tile || !tile->header || !tile->verts || !tile->polys)
+			continue;
+
+		dtMeshHeader *hdr = tile->header;
+		const float *verts = tile->verts;
+		int polyCount = hdr->polyCount;
+
+		for (int p = 0; p < polyCount; ++p)
+		{
+			const dtPoly &poly = tile->polys[p];
+
+			// skip off-mesh connection polygons
+			if (poly.type == DT_POLYTYPE_OFFMESH_CONNECTION)
+				continue;
+
+			int vcount = (int)poly.vertCount;
+			if (vcount >= 3)
+			{
+				// fan triangulation (0, k-1, k) - append triangles with y offset
+				int i0 = poly.verts[0];
+				for (int k = 2; k < vcount; ++k)
+				{
+					int i1 = poly.verts[k - 1];
+					int i2 = poly.verts[k];
+
+					// vertex a
+					navigationVertices.push_back(verts[3 * i0 + 0]);
+					navigationVertices.push_back(verts[3 * i0 + 1] + navMeshOffset);
+					navigationVertices.push_back(verts[3 * i0 + 2]);
+
+					// vertex b
+					navigationVertices.push_back(verts[3 * i1 + 0]);
+					navigationVertices.push_back(verts[3 * i1 + 1] + navMeshOffset);
+					navigationVertices.push_back(verts[3 * i1 + 2]);
+
+					// vertex c
+					navigationVertices.push_back(verts[3 * i2 + 0]);
+					navigationVertices.push_back(verts[3 * i2 + 1] + navMeshOffset);
+					navigationVertices.push_back(verts[3 * i2 + 2]);
+
+					triVertexCounter += 3;
+				}
+			}
+
+			// Collect edges for dedup/area-checking (use original coords for key/area decisions)
+			if (vcount >= 2)
+			{
+				int area = (int)poly.area; // polygon's area id
+				for (int e = 0; e < vcount; ++e)
+				{
+					int ia = poly.verts[e];
+					int ib = poly.verts[(e + 1) % vcount];
+
+					float ax = verts[3 * ia + 0];
+					float ay = verts[3 * ia + 1];
+					float az = verts[3 * ia + 2];
+
+					float bx = verts[3 * ib + 0];
+					float by = verts[3 * ib + 1];
+					float bz = verts[3 * ib + 2];
+
+					std::string key = makeEdgeKeyQ(ax, ay, az, bx, by, bz);
+
+					auto it = edgeMap.find(key);
+					if (it == edgeMap.end())
+					{
+						EdgeInfo info;
+						info.count = 1;
+						info.area = area;
+						info.diffArea = false;
+						info.ax = ax;
+						info.ay = ay;
+						info.az = az;
+						info.bx = bx;
+						info.by = by;
+						info.bz = bz;
+						edgeMap.emplace(std::move(key), std::move(info));
+					}
+					else
+					{
+						EdgeInfo &info = it->second;
+						info.count += 1;
+						if (info.area != area)
+							info.diffArea = true;
+					}
+				}
+			}
+		}
+	}
+
+	navTriVertexCount = triVertexCounter;
+
+	// Append only boundary edges (append endpoints with vertical offset)
+	for (auto &kv : edgeMap)
+	{
+		const EdgeInfo &info = kv.second;
+		if (info.count == 1 || info.diffArea)
+		{
+			navigationVertices.push_back(info.ax);
+			navigationVertices.push_back(info.ay + navMeshOffset);
+			navigationVertices.push_back(info.az);
+
+			navigationVertices.push_back(info.bx);
+			navigationVertices.push_back(info.by + navMeshOffset);
+			navigationVertices.push_back(info.bz);
+		}
+	}
+
+	glGenVertexArrays(1, &navVAO);
+	glGenBuffers(1, &navVBO);
+	glBindVertexArray(navVAO);
+	glBindBuffer(GL_ARRAY_BUFFER, navVBO);
+	GLsizeiptr bufSize = (GLsizeiptr)(navigationVertices.size() * sizeof(float));
+	glBufferData(GL_ARRAY_BUFFER, bufSize, navigationVertices.empty() ? NULL : navigationVertices.data(), GL_STATIC_DRAW);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
+	glEnableVertexAttribArray(0);
+	glBindVertexArray(0);
+}
+
+//! Returns a single vector partitioned into [0…fillVerts) = triangles, [fillVerts…end) = lines.
+void Terrain::buildPhysicsVertices()
+{
 	// first, accumulate *only* triangles
 	for (int i = 0; i < tilesX; i++)
 		for (int j = 0; j < tilesZ; j++)
@@ -315,8 +528,8 @@ void Terrain::getEntitiesVertices(int &outFillVertexCount)
 					{
 						int a = F[f][0], b = F[f][1], c = F[f][2], d = F[f][3];
 						// tri1 (a,b,c), tri2 (a,c,d)
-						allVertices.insert(allVertices.end(), {v[a].X, v[a].Y, v[a].Z, v[b].X, v[b].Y, v[b].Z, v[c].X, v[c].Y, v[c].Z,
-															   v[a].X, v[a].Y, v[a].Z, v[c].X, v[c].Y, v[c].Z, v[d].X, v[d].Y, v[d].Z});
+						physicsVertices.insert(physicsVertices.end(), {v[a].X, v[a].Y, v[a].Z, v[b].X, v[b].Y, v[b].Z, v[c].X, v[c].Y, v[c].Z,
+																	   v[a].X, v[a].Y, v[a].Z, v[c].X, v[c].Y, v[c].Z, v[d].X, v[d].Y, v[d].Z});
 					}
 				}
 				// --- CYLINDER (unchanged) ---
@@ -357,23 +570,23 @@ void Terrain::getEntitiesVertices(int &outFillVertexCount)
 						geom->m_absTransform.transformVect(t1);
 
 						// --- Bottom Cap (CCW when viewed from below)
-						allVertices.insert(allVertices.end(), {b1.X, b1.Y, b1.Z,
-															   b0.X, b0.Y, b0.Z,
-															   centerBottom.X, centerBottom.Y, centerBottom.Z});
+						physicsVertices.insert(physicsVertices.end(), {b1.X, b1.Y, b1.Z,
+																	   b0.X, b0.Y, b0.Z,
+																	   centerBottom.X, centerBottom.Y, centerBottom.Z});
 
 						// --- Top Cap (CCW when viewed from above)
-						allVertices.insert(allVertices.end(), {t0.X, t0.Y, t0.Z,
-															   t1.X, t1.Y, t1.Z,
-															   centerTop.X, centerTop.Y, centerTop.Z});
+						physicsVertices.insert(physicsVertices.end(), {t0.X, t0.Y, t0.Z,
+																	   t1.X, t1.Y, t1.Z,
+																	   centerTop.X, centerTop.Y, centerTop.Z});
 
 						// --- Side Face (two triangles)
-						allVertices.insert(allVertices.end(), {b0.X, b0.Y, b0.Z,
-															   t0.X, t0.Y, t0.Z,
-															   t1.X, t1.Y, t1.Z});
+						physicsVertices.insert(physicsVertices.end(), {b0.X, b0.Y, b0.Z,
+																	   t0.X, t0.Y, t0.Z,
+																	   t1.X, t1.Y, t1.Z});
 
-						allVertices.insert(allVertices.end(), {b0.X, b0.Y, b0.Z,
-															   t1.X, t1.Y, t1.Z,
-															   b1.X, b1.Y, b1.Z});
+						physicsVertices.insert(physicsVertices.end(), {b0.X, b0.Y, b0.Z,
+																	   t1.X, t1.Y, t1.Z,
+																	   b1.X, b1.Y, b1.Z});
 					}
 				}
 
@@ -405,16 +618,16 @@ void Terrain::getEntitiesVertices(int &outFillVertexCount)
 						geom->m_absTransform.transformVect(v2);
 
 						// Fix winding: v0 → v2 → v1 instead of v0 → v1 → v2
-						allVertices.insert(allVertices.end(), {v0.X, v0.Y, v0.Z,
-															   v2.X, v2.Y, v2.Z,
-															   v1.X, v1.Y, v1.Z});
+						physicsVertices.insert(physicsVertices.end(), {v0.X, v0.Y, v0.Z,
+																	   v2.X, v2.Y, v2.Z,
+																	   v1.X, v1.Y, v1.Z});
 					}
 				}
 			}
 		}
 
 	// mark where the triangle section ends
-	outFillVertexCount = (int)allVertices.size();
+	fillCount = (int)physicsVertices.size();
 
 	for (int i = 0; i < tilesX; i++)
 		for (int j = 0; j < tilesZ; j++)
@@ -435,8 +648,8 @@ void Terrain::getEntitiesVertices(int &outFillVertexCount)
 						{0, 1}, {1, 2}, {2, 3}, {3, 0}, {4, 5}, {5, 6}, {6, 7}, {7, 4}, {0, 4}, {1, 5}, {2, 6}, {3, 7}};
 					for (auto &e : E)
 					{
-						allVertices.insert(allVertices.end(), {v[e[0]].X, v[e[0]].Y, v[e[0]].Z,
-															   v[e[1]].X, v[e[1]].Y, v[e[1]].Z});
+						physicsVertices.insert(physicsVertices.end(), {v[e[0]].X, v[e[0]].Y, v[e[0]].Z,
+																	   v[e[1]].X, v[e[1]].Y, v[e[1]].Z});
 					}
 				}
 				// CYLINDER edges
@@ -475,23 +688,23 @@ void Terrain::getEntitiesVertices(int &outFillVertexCount)
 						geom->m_absTransform.transformVect(t1);
 
 						// --- Bottom Cap (CCW from below)
-						allVertices.insert(allVertices.end(), {b1.X, b1.Y, b1.Z,
-															   b0.X, b0.Y, b0.Z,
-															   centerBottom.X, centerBottom.Y, centerBottom.Z});
+						physicsVertices.insert(physicsVertices.end(), {b1.X, b1.Y, b1.Z,
+																	   b0.X, b0.Y, b0.Z,
+																	   centerBottom.X, centerBottom.Y, centerBottom.Z});
 
-						allVertices.insert(allVertices.end(), {b0.X, b0.Y, b0.Z,
-															   t1.X, t1.Y, t1.Z,
-															   b1.X, b1.Y, b1.Z});
+						physicsVertices.insert(physicsVertices.end(), {b0.X, b0.Y, b0.Z,
+																	   t1.X, t1.Y, t1.Z,
+																	   b1.X, b1.Y, b1.Z});
 
 						// --- Side Face
-						allVertices.insert(allVertices.end(), {b0.X, b0.Y, b0.Z,
-															   t0.X, t0.Y, t0.Z,
-															   t1.X, t1.Y, t1.Z});
+						physicsVertices.insert(physicsVertices.end(), {b0.X, b0.Y, b0.Z,
+																	   t0.X, t0.Y, t0.Z,
+																	   t1.X, t1.Y, t1.Z});
 
 						// --- Top Cap (CCW from above)
-						allVertices.insert(allVertices.end(), {t0.X, t0.Y, t0.Z,
-															   t1.X, t1.Y, t1.Z,
-															   centerTop.X, centerTop.Y, centerTop.Z});
+						physicsVertices.insert(physicsVertices.end(), {t0.X, t0.Y, t0.Z,
+																	   t1.X, t1.Y, t1.Z,
+																	   centerTop.X, centerTop.Y, centerTop.Z});
 					}
 				}
 				// MESH edges
@@ -523,17 +736,14 @@ void Terrain::getEntitiesVertices(int &outFillVertexCount)
 						geom->m_absTransform.transformVect(v2);
 
 						// Fix winding after mirroring: v0 → v2 → v1
-						allVertices.insert(allVertices.end(), {v0.X, v0.Y, v0.Z, v2.X, v2.Y, v2.Z,
-															   v2.X, v2.Y, v2.Z, v1.X, v1.Y, v1.Z,
-															   v1.X, v1.Y, v1.Z, v0.X, v0.Y, v0.Z});
+						physicsVertices.insert(physicsVertices.end(), {v0.X, v0.Y, v0.Z, v2.X, v2.Y, v2.Z,
+																	   v2.X, v2.Y, v2.Z, v1.X, v1.Y, v1.Z,
+																	   v1.X, v1.Y, v1.Z, v0.X, v0.Y, v0.Z});
 					}
 				}
 			}
 		}
 
-	physicsVertices = allVertices;
-
-	// 5. build the physics mesh vertex data in world space coordinates
 	glGenVertexArrays(1, &phyVAO);
 	glGenBuffers(1, &phyVBO);
 	glBindVertexArray(phyVAO);
@@ -552,11 +762,13 @@ void Terrain::reset()
 	fileSize = vertexCount = faceCount = modelCount = 0;
 
 	glDeleteVertexArrays(1, &trnVAO);
+	glDeleteVertexArrays(1, &navVAO);
 	glDeleteVertexArrays(1, &phyVAO);
 	glDeleteBuffers(1, &trnVBO);
+	glDeleteBuffers(1, &navVBO);
 	glDeleteBuffers(1, &phyVBO);
 
-	trnVAO = trnVBO = phyVAO = phyVBO = 0;
+	trnVAO = trnVBO = navVAO = navVBO = phyVAO = phyVBO = 0;
 
 	if (!textureNames.empty())
 	{
@@ -571,14 +783,17 @@ void Terrain::reset()
 	tiles.clear();
 
 	terrainVertices.clear();
+	navigationVertices.clear();
 	physicsVertices.clear();
 	sounds.clear();
+
+	delete navMesh;
 
 	terrainLoaded = false;
 }
 
 //! Renders terrain and physics geometry meshes.
-void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple)
+void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool renderNavMesh)
 {
 	if (!terrainLoaded)
 		return;
@@ -609,15 +824,33 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple)
 		glDrawArrays(GL_TRIANGLES, 0, terrainVertices.size() / 6);
 	}
 
-	glBindVertexArray(phyVAO);
+	if (renderNavMesh && !navigationVertices.empty())
+	{
+		glBindVertexArray(navVAO);
 
-	shader.setInt("renderMode", 4);
-	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-	glDrawArrays(GL_TRIANGLES, 0, fillCount / 3);
+		int totalNavVertices = (int)(navigationVertices.size() / 3);
+		int lineVerts = totalNavVertices - navTriVertexCount;
 
-	shader.setInt("renderMode", 2);
-	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-	glDrawArrays(GL_LINES, fillCount / 3, (physicsVertices.size() - fillCount) / 3);
+		shader.setInt("renderMode", 5);
+
+		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+		glDrawArrays(GL_TRIANGLES, 0, navTriVertexCount);
+
+		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+		glDrawArrays(GL_LINES, navTriVertexCount, lineVerts);
+	}
+
+	/*
+		glBindVertexArray(phyVAO);
+
+		shader.setInt("renderMode", 4);
+		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+		glDrawArrays(GL_TRIANGLES, 0, fillCount / 3);
+
+		shader.setInt("renderMode", 2);
+		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+		glDrawArrays(GL_LINES, fillCount / 3, (physicsVertices.size() - fillCount) / 3);
+	*/
 
 	for (int i = 0; i < tilesX; i++)
 		for (int j = 0; j < tilesZ; j++)
