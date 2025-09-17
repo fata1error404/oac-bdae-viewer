@@ -113,7 +113,7 @@ inline void loadTileEntities(CZipResReader *itemsArchive, CZipResReader *physics
 		for (char &c : tmpName)
 			c = std::tolower(c);
 
-		std::cout << tmpName << std::endl;
+		// std::cout << tmpName << std::endl;
 
 		// loop through each entity, filter those that are part of the i-th game object by index, and load them
 		for (int j = 0; j < header->entityCount; j++)
@@ -144,7 +144,7 @@ inline void loadEntity(CZipResReader *physicsArchive, const char *fname, const E
 			MTX4 absTransform;
 			entityInfo.rotation.getMatrix(absTransform);
 
-			if (entityInfo.scale != VEC3(1.f, 1.f, 1.f))
+			if (entityInfo.scale != VEC3(1.0f, 1.0f, 1.0f))
 				absTransform.postScale(entityInfo.scale);
 
 			absTransform.setTranslation(entityInfo.relativePos + tileOff);
@@ -156,23 +156,23 @@ inline void loadEntity(CZipResReader *physicsArchive, const char *fname, const E
 
 			// [TODO] implement geometry
 			// CPhysics::instance()->RegisterGeom(physicsGeom, &(tile->m_pGeomList));
+
+			// build OpenGL style model matrix: translate -> rotate -> scale
+			glm::mat4 model = glm::mat4(1.0f);
+			model = glm::translate(glm::mat4(1.0f), glm::vec3(entityInfo.relativePos.X + tileOff.X, entityInfo.relativePos.Y + tileOff.Y, entityInfo.relativePos.Z + tileOff.Z));
+			model *= glm::mat4_cast(glm::quat(-entityInfo.rotation.W, entityInfo.rotation.X, entityInfo.rotation.Y, entityInfo.rotation.Z));
+			model *= glm::scale(glm::mat4(1.0f), glm::vec3(entityInfo.scale.X, entityInfo.scale.Y, entityInfo.scale.Z));
+
+			// load .bdae model
+			Model *bdaeModel = new Model();
+			Sound unused(true);
+			bdaeModel->load(fname, model, unused, true);
+
+			if (bdaeModel->modelLoaded)
+				tile->models.push_back(bdaeModel);
+
+			terrain.modelCount++;
 		}
-
-		// build OpenGL style model matrix
-		glm::mat4 model(1.0f);
-		model = glm::translate(model, glm::vec3(entityInfo.relativePos.X + tileOff.X, entityInfo.relativePos.Y + tileOff.Y, entityInfo.relativePos.Z + tileOff.Z));
-		model *= glm::mat4_cast(glm::quat(entityInfo.rotation.W, entityInfo.rotation.X, entityInfo.rotation.Y, entityInfo.rotation.Z));
-		model = glm::scale(model, glm::vec3(entityInfo.scale.X, entityInfo.scale.Y, entityInfo.scale.Z));
-
-		// load .bdae model
-		Model *bdaeModel = new Model();
-		Sound unused(true);
-		bdaeModel->load(fname, model, unused, true);
-
-		if (bdaeModel->modelLoaded)
-			tile->models.push_back(bdaeModel);
-
-		terrain.modelCount++;
 
 		break;
 	}

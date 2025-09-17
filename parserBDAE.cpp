@@ -4,7 +4,7 @@
 #include "Logger.h"
 #include "PackPatchReader.h"
 
-//! Parses .bdae file and sets up model mesh data.
+//! Parses .bdae file and sets up model mesh and texture data.
 int Model::init(IReadResFile *file)
 {
 	LOG("\033[1m\033[38;2;200;200;200m[Init] Starting Model::init..\033[0m\n");
@@ -260,13 +260,19 @@ int Model::init(IReadResFile *file)
 	return 0;
 }
 
-//! Loads .bdae file from disk, calls the parser and sets up model textures and sounds.
+//! Loads .bdae file from disk, calls the parser and searches for alternative textures and sounds.
 void Model::load(const char *fpath, glm::mat4 modelMatrix, Sound &sound, bool isTerrainViewer)
 {
 	reset();
 
 	// 1. load .bdae file
-	CPackPatchReader *bdaeArchive = new CPackPatchReader(fpath, true, false);			// open outer .bdae archive file
+	CPackPatchReader *bdaeArchive;
+
+	if (isTerrainViewer)
+		bdaeArchive = new CPackPatchReader((std::string("data/model/unsorted/") + (fpath + 6)).c_str(), true, false); // open outer .bdae archive file
+	else
+		bdaeArchive = new CPackPatchReader(fpath, true, false);
+
 	IReadResFile *bdaeFile = bdaeArchive->openFile("little_endian_not_quantized.bdae"); // open inner .bdae file
 
 	if (bdaeFile)
@@ -277,9 +283,7 @@ void Model::load(const char *fpath, glm::mat4 modelMatrix, Sound &sound, bool is
 		if (result != 0)
 			return;
 
-		if (isTerrainViewer)
-			model = modelMatrix;
-		else
+		if (!isTerrainViewer) // 3D model viewer
 		{
 			// compute the mesh's center in world space for its correct rotation (instead of always rotating around the origin (0, 0, 0))
 			meshCenter = glm::vec3(0.0f);
@@ -292,76 +296,73 @@ void Model::load(const char *fpath, glm::mat4 modelMatrix, Sound &sound, bool is
 			}
 
 			meshCenter /= (vertices.size() / 8);
-		}
 
-		// 3. process strings retrieved from .bdae
-		std::string modelPath(fpath);
-		std::replace(modelPath.begin(), modelPath.end(), '\\', '/'); // normalize model path for cross-platform compatibility (Windows uses '\', Linux uses '/')
+			// 3. process strings retrieved from .bdae
+			std::string modelPath(fpath);
+			std::replace(modelPath.begin(), modelPath.end(), '\\', '/'); // normalize model path for cross-platform compatibility (Windows uses '\', Linux uses '/')
 
-		// retrieve model subpath
-		const char *subpathStart = std::strstr(modelPath.c_str(), "/model/") + 7; // subpath starts after '/model/' (texture and model files have the same subpath, e.g. 'creature/pet/')
-		const char *subpathEnd = std::strrchr(modelPath.c_str(), '/') + 1;		  // last '/' before the file name
-		std::string textureSubpath(subpathStart, subpathEnd);
+			// retrieve model subpath
+			const char *subpathStart = std::strstr(modelPath.c_str(), "/model/") + 7; // subpath starts after '/model/' (texture and model files have the same subpath, e.g. 'creature/pet/')
+			const char *subpathEnd = std::strrchr(modelPath.c_str(), '/') + 1;		  // last '/' before the file name
+			std::string textureSubpath(subpathStart, subpathEnd);
 
-		bool isUnsortedFolder = true; // for 'unsorted' folder
+			bool isUnsortedFolder = false; // for 'unsorted' folder
 
-		// if (textureSubpath.rfind("unsorted/", 0) == 0)
-		// 	isUnsortedFolder = true;
+			if (textureSubpath.rfind("unsorted/", 0) == 0)
+				isUnsortedFolder = true;
 
-		// post-process retrieved texture names
-		for (int i = 0, n = (int)textureNames.size(); i < n; i++)
-		{
-			std::string &s = textureNames[i];
+			// post-process retrieved texture names
+			for (int i = 0, n = (int)textureNames.size(); i < n; i++)
+			{
+				std::string &s = textureNames[i];
 
-			if (s.length() <= 4)
-				continue;
+				if (s.length() <= 4)
+					continue;
 
-			// convert to lowercase
-			for (char &c : s)
-				c = std::tolower(c);
+				// convert to lowercase
+				for (char &c : s)
+					c = std::tolower(c);
 
-			// remove 'avatar/' if it exists
-			// int avatarPos = s.find("avatar/");
-			// if (avatarPos != (int)std::string::npos && !isUnsortedFolder)
-			// 	s.erase(avatarPos, 7);
+				// remove 'avatar/' if it exists
+				int avatarPos = s.find("avatar/");
+				if (avatarPos != (int)std::string::npos && !isUnsortedFolder)
+					s.erase(avatarPos, 7);
 
-			// remove 'texture/' if it exists
-			if (s.rfind("texture/", 0) == 0)
-				s.erase(0, 8);
+				// remove 'texture/' if it exists
+				if (s.rfind("texture/", 0) == 0)
+					s.erase(0, 8);
 
-			// replace the ending with '.png'
-			s.replace(s.length() - 4, 4, ".png");
+				// replace the ending with '.png'
+				s.replace(s.length() - 4, 4, ".png");
 
-			// build final path
-			if (!isUnsortedFolder)
-				s = "data/texture/" + textureSubpath + s;
-			else
-				s = "data/texture/unsorted/" + s;
-		}
+				// build final path
+				if (!isUnsortedFolder)
+					s = "data/texture/" + textureSubpath + s;
+				else
+					s = "data/texture/unsorted/" + s;
+			}
 
-		// set file info to be displayed in the settings panel
-		fileName = modelPath.substr(modelPath.find_last_of("/\\") + 1); // file name is after the last path separator in the full path
-		vertexCount = vertices.size() / 8;
+			// set file info to be displayed in the settings panel
+			fileName = modelPath.substr(modelPath.find_last_of("/\\") + 1); // file name is after the last path separator in the full path
+			vertexCount = vertices.size() / 8;
 
-		// if a texture file matching the model file name exists, override the parsed texture (for single-texture models only)
-		std::string s = "data/texture/" + textureSubpath + fileName;
-		s.replace(s.length() - 5, 5, ".png");
+			// if a texture file matching the model file name exists, override the parsed texture (for single-texture models only)
+			std::string s = "data/texture/" + textureSubpath + fileName;
+			s.replace(s.length() - 5, 5, ".png");
 
-		// if (textureCount == 1 && std::filesystem::exists(s))
-		// {
-		// 	textureNames.clear();
-		// 	textureNames.push_back(s);
-		// }
+			if (textureCount == 1 && std::filesystem::exists(s))
+			{
+				textureNames.clear();
+				textureNames.push_back(s);
+			}
 
-		// if a texture name is missing in the .bdae file, use this file's name instead (assuming the texture file was manually found and named)
-		if (textureNames.empty())
-		{
-			textureNames.push_back(s);
-			textureCount++;
-		}
+			// if a texture name is missing in the .bdae file, use this file's name instead (assuming the texture file was manually found and named)
+			if (textureNames.empty())
+			{
+				textureNames.push_back(s);
+				textureCount++;
+			}
 
-		if (!isTerrainViewer)
-		{
 			// 4. search for alternative color texture files
 			// [TODO] handle for multi-texture models
 			if (textureNames.size() == 1 && std::filesystem::exists(textureNames[0]) && !isUnsortedFolder)
@@ -523,6 +524,27 @@ void Model::load(const char *fpath, glm::mat4 modelMatrix, Sound &sound, bool is
 
 			for (int i = 0; i < (int)sounds.size(); i++)
 				LOG("[", i + 1, "]  ", sounds[i]);
+		}
+		else // terrain viewer
+		{
+			model = modelMatrix;
+
+			for (int i = 0, n = (int)textureNames.size(); i < n; i++)
+			{
+				std::string &s = textureNames[i];
+
+				if (s.length() <= 4)
+					continue;
+
+				for (char &c : s)
+					c = std::tolower(c);
+
+				if (s.rfind("texture/", 0) == 0)
+					s.erase(0, 8);
+
+				s.replace(s.length() - 4, 4, ".png");
+				s = "data/texture/unsorted/" + s;
+			}
 		}
 
 		free(DataBuffer);

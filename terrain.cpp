@@ -609,15 +609,15 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple)
 		glDrawArrays(GL_TRIANGLES, 0, terrainVertices.size() / 6);
 	}
 
-	// glBindVertexArray(phyVAO);
+	glBindVertexArray(phyVAO);
 
-	// shader.setInt("renderMode", 4);
-	// glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-	// glDrawArrays(GL_TRIANGLES, 0, fillCount / 3);
+	shader.setInt("renderMode", 4);
+	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+	glDrawArrays(GL_TRIANGLES, 0, fillCount / 3);
 
-	// shader.setInt("renderMode", 2);
-	// glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-	// glDrawArrays(GL_LINES, fillCount / 3, (physicsVertices.size() - fillCount) / 3);
+	shader.setInt("renderMode", 2);
+	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+	glDrawArrays(GL_LINES, fillCount / 3, (physicsVertices.size() - fillCount) / 3);
 
 	for (int i = 0; i < tilesX; i++)
 		for (int j = 0; j < tilesZ; j++)
@@ -628,7 +628,7 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple)
 			int n = tiles[i][j]->models.size();
 
 			for (int k = 0, n = tiles[i][j]->models.size(); k < n; k++)
-				tiles[i][j]->models[k]->draw(view, projection, camera.Position, light.showLighting, true);
+				tiles[i][j]->models[k]->draw(view, projection, camera.Position, light.showLighting, simple);
 
 			// if (tiles[i][j]->models.size() > 0)
 			// {

@@ -3,13 +3,13 @@
 
 #include <iostream>
 
-#define MODEL_INFO
+// #define MODEL_INFO
 
 template <typename... Args>
 inline void LOG(Args &&...args)
 {
 #ifdef MODEL_INFO
-    (std::cout << ... << args) << std::endl;
+	(std::cout << ... << args) << std::endl;
 #endif
 }
 

@@ -72,7 +72,6 @@ class Model
 		: shader("shaders/model.vs", "shaders/model.fs"),
 		  VAO(0),
 		  VBO(0),
-		  totalSubmeshCount(0),
 		  modelLoaded(false),
 		  meshCenter(glm::vec3(-1.0f)),
 		  DataBuffer(NULL)
@@ -85,10 +84,10 @@ class Model
 		shader.setFloat("specularStrength", specularStrength);
 	}
 
-	//! Parses .bdae file and sets up model mesh data.
+	//! Parses .bdae file and sets up model mesh and texture data.
 	int init(IReadResFile *file);
 
-	//! Loads .bdae file from disk, calls the parser and sets up model textures and sounds.
+	//! Loads .bdae file from disk, calls the parser and searches for alternative textures and sounds.
 	void load(const char *fpath, glm::mat4 modelMatrix, Sound &sound, bool isTerrainViewer);
 
 	//! Clears GPU memory and resets viewer state.
