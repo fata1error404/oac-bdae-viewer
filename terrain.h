@@ -14,6 +14,7 @@
 #include "libs/glm/gtc/packing.hpp"
 #include "libs/glm/ext/vector_uint4.hpp"
 #include "libs/glm/gtc/type_precision.hpp"
+#include "parserBDAE.h"
 #include "CZipResReader.h"
 #include "DetourNavMesh.h"
 
@@ -28,6 +29,7 @@ class Terrain
 	Shader shader;
 	Camera &camera;
 	Light &light;
+	Model skybox;
 	std::string fileName;
 	int fileSize, vertexCount, faceCount, modelCount;
 	unsigned int trnVAO, trnVBO, navVAO, navVBO, phyVAO, phyVBO;
@@ -49,6 +51,7 @@ class Terrain
 
 	Terrain(Camera &cam, Light &light)
 		: shader("shaders/terrain.vs", "shaders/terrain.fs"),
+		  skybox("shaders/skybox.vs", "shaders/skybox.fs"),
 		  camera(cam),
 		  light(light),
 		  trnVAO(0),

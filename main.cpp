@@ -153,7 +153,7 @@ int main()
 
 	Sound ourSound;
 
-	Model bdaeModel;
+	Model bdaeModel("shaders/model.vs", "shaders/model.fs");
 
 	Terrain terrainModel(ourCamera, ourLight);
 

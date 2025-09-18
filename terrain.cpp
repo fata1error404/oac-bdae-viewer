@@ -270,6 +270,11 @@ void Terrain::load(const char *fpath, Sound &sound)
 	buildNavigationVertices();
 	buildPhysicsVertices();
 
+	// load skybox
+	std::string terrainName = std::filesystem::path(fpath).filename().string();
+	std::string skyboxName = "model/skybox/" + terrainName.replace(terrainName.size() - 4, 4, "") + ".bdae";
+	skybox.load(skyboxName.c_str(), glm::mat4(1.0f), sound, true);
+
 	// set file info to be displayed in the settings panel
 	fileName = std::filesystem::path(fpath).filename().string();
 	fileSize = std::filesystem::file_size(fpath);
@@ -853,6 +858,7 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool rende
 	*/
 
 	for (int i = 0; i < tilesX; i++)
+	{
 		for (int j = 0; j < tilesZ; j++)
 		{
 			if (!tiles[i][j])
@@ -870,6 +876,15 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool rende
 			//     tiles[i][j]->models[0]->draw(view, projection, camera.Position, simple);
 			// }
 		}
+	}
+
+	// render skybox
+	if (!simple)
+	{
+		glDepthFunc(GL_LEQUAL);
+		skybox.draw(glm::mat4(glm::mat3(view)), projection, camera.Position, false, false);
+		glDepthFunc(GL_LESS);
+	}
 
 	glBindVertexArray(0);
 }

@@ -164,7 +164,7 @@ inline void loadEntity(CZipResReader *physicsArchive, const char *fname, const E
 			model *= glm::scale(glm::mat4(1.0f), glm::vec3(entityInfo.scale.X, entityInfo.scale.Y, entityInfo.scale.Z));
 
 			// load .bdae model
-			Model *bdaeModel = new Model();
+			Model *bdaeModel = new Model("shaders/model.vs", "shaders/model.fs");
 			Sound unused(true);
 			bdaeModel->load(fname, model, unused, true);
 

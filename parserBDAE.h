@@ -68,8 +68,8 @@ class Model
 
 	char *DataBuffer; // raw binary content of .bdae file
 
-	Model()
-		: shader("shaders/model.vs", "shaders/model.fs"),
+	Model(const char *vertex, const char *fragment)
+		: shader(vertex, fragment),
 		  VAO(0),
 		  VBO(0),
 		  modelLoaded(false),

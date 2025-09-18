@@ -275,203 +275,176 @@ void Model::load(const char *fpath, glm::mat4 modelMatrix, Sound &sound, bool is
 
 	IReadResFile *bdaeFile = bdaeArchive->openFile("little_endian_not_quantized.bdae"); // open inner .bdae file
 
-	if (bdaeFile)
+	if (!bdaeFile)
+		return;
+
+	// 2. run the parser
+	int result = init(bdaeFile);
+
+	if (result != 0)
+		return;
+
+	if (!isTerrainViewer) // 3D model viewer
 	{
-		// 2. run the parser
-		int result = init(bdaeFile);
+		// compute the mesh's center in world space for its correct rotation (instead of always rotating around the origin (0, 0, 0))
+		meshCenter = glm::vec3(0.0f);
 
-		if (result != 0)
-			return;
-
-		if (!isTerrainViewer) // 3D model viewer
+		for (int i = 0, n = vertices.size() / 8; i < n; i++)
 		{
-			// compute the mesh's center in world space for its correct rotation (instead of always rotating around the origin (0, 0, 0))
-			meshCenter = glm::vec3(0.0f);
+			meshCenter.x += vertices[i * 8 + 0];
+			meshCenter.y += vertices[i * 8 + 1];
+			meshCenter.z += vertices[i * 8 + 2];
+		}
 
-			for (int i = 0, n = vertices.size() / 8; i < n; i++)
+		meshCenter /= (vertices.size() / 8);
+
+		// 3. process strings retrieved from .bdae
+		std::string modelPath(fpath);
+		std::replace(modelPath.begin(), modelPath.end(), '\\', '/'); // normalize model path for cross-platform compatibility (Windows uses '\', Linux uses '/')
+
+		// retrieve model subpath
+		const char *subpathStart = std::strstr(modelPath.c_str(), "/model/") + 7; // subpath starts after '/model/' (texture and model files have the same subpath, e.g. 'creature/pet/')
+		const char *subpathEnd = std::strrchr(modelPath.c_str(), '/') + 1;		  // last '/' before the file name
+		std::string textureSubpath(subpathStart, subpathEnd);
+
+		bool isUnsortedFolder = false; // for 'unsorted' folder
+
+		if (textureSubpath.rfind("unsorted/", 0) == 0)
+			isUnsortedFolder = true;
+
+		// post-process retrieved texture names
+		for (int i = 0, n = (int)textureNames.size(); i < n; i++)
+		{
+			std::string &s = textureNames[i];
+
+			if (s.length() <= 4)
+				continue;
+
+			// convert to lowercase
+			for (char &c : s)
+				c = std::tolower(c);
+
+			// remove 'avatar/' if it exists
+			int avatarPos = s.find("avatar/");
+			if (avatarPos != (int)std::string::npos && !isUnsortedFolder)
+				s.erase(avatarPos, 7);
+
+			// remove 'texture/' if it exists
+			if (s.rfind("texture/", 0) == 0)
+				s.erase(0, 8);
+
+			// replace the ending with '.png'
+			s.replace(s.length() - 4, 4, ".png");
+
+			// build final path
+			if (!isUnsortedFolder)
+				s = "data/texture/" + textureSubpath + s;
+			else
+				s = "data/texture/unsorted/" + s;
+		}
+
+		// set file info to be displayed in the settings panel
+		fileName = modelPath.substr(modelPath.find_last_of("/\\") + 1); // file name is after the last path separator in the full path
+		vertexCount = vertices.size() / 8;
+
+		// if a texture file matching the model file name exists, override the parsed texture (for single-texture models only)
+		std::string s = "data/texture/" + textureSubpath + fileName;
+		s.replace(s.length() - 5, 5, ".png");
+
+		if (textureCount == 1 && std::filesystem::exists(s))
+		{
+			textureNames.clear();
+			textureNames.push_back(s);
+		}
+
+		// if a texture name is missing in the .bdae file, use this file's name instead (assuming the texture file was manually found and named)
+		if (textureNames.empty())
+		{
+			textureNames.push_back(s);
+			textureCount++;
+		}
+
+		// 4. search for alternative color texture files
+		// [TODO] handle for multi-texture models
+		if (textureNames.size() == 1 && std::filesystem::exists(textureNames[0]) && !isUnsortedFolder)
+		{
+			std::filesystem::path texturePath("data/texture/" + textureSubpath);
+			std::string baseTextureName = std::filesystem::path(textureNames[0]).stem().string(); // texture file name without extension or folder (e.g. 'boar_01' or 'puppy_bear_black')
+
+			std::string groupName; // name shared by a group of related textures
+
+			// naming rule #1
+			if (baseTextureName.find("lvl") != std::string::npos && baseTextureName.find("world") != std::string::npos)
+				groupName = baseTextureName;
+
+			// naming rule #2
+			for (const std::filesystem::directory_entry &entry : std::filesystem::directory_iterator(texturePath))
 			{
-				meshCenter.x += vertices[i * 8 + 0];
-				meshCenter.y += vertices[i * 8 + 1];
-				meshCenter.z += vertices[i * 8 + 2];
-			}
-
-			meshCenter /= (vertices.size() / 8);
-
-			// 3. process strings retrieved from .bdae
-			std::string modelPath(fpath);
-			std::replace(modelPath.begin(), modelPath.end(), '\\', '/'); // normalize model path for cross-platform compatibility (Windows uses '\', Linux uses '/')
-
-			// retrieve model subpath
-			const char *subpathStart = std::strstr(modelPath.c_str(), "/model/") + 7; // subpath starts after '/model/' (texture and model files have the same subpath, e.g. 'creature/pet/')
-			const char *subpathEnd = std::strrchr(modelPath.c_str(), '/') + 1;		  // last '/' before the file name
-			std::string textureSubpath(subpathStart, subpathEnd);
-
-			bool isUnsortedFolder = false; // for 'unsorted' folder
-
-			if (textureSubpath.rfind("unsorted/", 0) == 0)
-				isUnsortedFolder = true;
-
-			// post-process retrieved texture names
-			for (int i = 0, n = (int)textureNames.size(); i < n; i++)
-			{
-				std::string &s = textureNames[i];
-
-				if (s.length() <= 4)
+				if (!entry.is_regular_file())
 					continue;
 
-				// convert to lowercase
-				for (char &c : s)
-					c = std::tolower(c);
+				std::filesystem::path entryPath = entry.path();
 
-				// remove 'avatar/' if it exists
-				int avatarPos = s.find("avatar/");
-				if (avatarPos != (int)std::string::npos && !isUnsortedFolder)
-					s.erase(avatarPos, 7);
+				if (entryPath.extension() != ".png")
+					continue;
 
-				// remove 'texture/' if it exists
-				if (s.rfind("texture/", 0) == 0)
-					s.erase(0, 8);
+				std::string baseEntryName = entryPath.stem().string();
 
-				// replace the ending with '.png'
-				s.replace(s.length() - 4, 4, ".png");
-
-				// build final path
-				if (!isUnsortedFolder)
-					s = "data/texture/" + textureSubpath + s;
-				else
-					s = "data/texture/unsorted/" + s;
-			}
-
-			// set file info to be displayed in the settings panel
-			fileName = modelPath.substr(modelPath.find_last_of("/\\") + 1); // file name is after the last path separator in the full path
-			vertexCount = vertices.size() / 8;
-
-			// if a texture file matching the model file name exists, override the parsed texture (for single-texture models only)
-			std::string s = "data/texture/" + textureSubpath + fileName;
-			s.replace(s.length() - 5, 5, ".png");
-
-			if (textureCount == 1 && std::filesystem::exists(s))
-			{
-				textureNames.clear();
-				textureNames.push_back(s);
-			}
-
-			// if a texture name is missing in the .bdae file, use this file's name instead (assuming the texture file was manually found and named)
-			if (textureNames.empty())
-			{
-				textureNames.push_back(s);
-				textureCount++;
-			}
-
-			// 4. search for alternative color texture files
-			// [TODO] handle for multi-texture models
-			if (textureNames.size() == 1 && std::filesystem::exists(textureNames[0]) && !isUnsortedFolder)
-			{
-				std::filesystem::path texturePath("data/texture/" + textureSubpath);
-				std::string baseTextureName = std::filesystem::path(textureNames[0]).stem().string(); // texture file name without extension or folder (e.g. 'boar_01' or 'puppy_bear_black')
-
-				std::string groupName; // name shared by a group of related textures
-
-				// naming rule #1
-				if (baseTextureName.find("lvl") != std::string::npos && baseTextureName.find("world") != std::string::npos)
+				if (baseEntryName.rfind(baseTextureName + '_', 0) == 0 &&								   // starts with '<baseTextureName>_'
+					baseEntryName.size() > baseTextureName.size() + 1 &&								   // has at least one character after the underscore
+					std::isdigit(static_cast<unsigned char>(baseEntryName[baseTextureName.size() + 1])) && // first character after '_' is a digit
+					entryPath.string() != textureNames[0])												   // not the original base texture itself
+				{
 					groupName = baseTextureName;
+					break;
+				}
+			}
 
-				// naming rule #2
-				for (const std::filesystem::directory_entry &entry : std::filesystem::directory_iterator(texturePath))
+			// for a numeric suffix (e.g. '_01', '_2'), remove it if exists (to derive a group name for searching potential alternative textures, e.g 'boar')
+			if (groupName.empty())
+			{
+				auto lastUnderscore = baseTextureName.rfind('_');
+
+				if (lastUnderscore != std::string::npos)
 				{
-					if (!entry.is_regular_file())
-						continue;
+					std::string afterLastUnderscore = baseTextureName.substr(lastUnderscore + 1);
 
-					std::filesystem::path entryPath = entry.path();
+					if (!afterLastUnderscore.empty() && std::all_of(afterLastUnderscore.begin(), afterLastUnderscore.end(), ::isdigit))
+						groupName = baseTextureName.substr(0, lastUnderscore);
+				}
+			}
 
-					if (entryPath.extension() != ".png")
-						continue;
+			// for a non numeric‑suffix (e.g. '_black'), use the “max‑match” approach to find the best group name
+			if (groupName.empty())
+			{
+				// build a list of all possible prefixes (e.g. 'puppy_black_bear', 'puppy_black', 'puppy')
+				std::vector<std::string> prefixes;
+				std::string s = baseTextureName;
 
-					std::string baseEntryName = entryPath.stem().string();
+				while (true)
+				{
+					prefixes.push_back(s);
+					auto pos = s.rfind('_');
 
-					if (baseEntryName.rfind(baseTextureName + '_', 0) == 0 &&								   // starts with '<baseTextureName>_'
-						baseEntryName.size() > baseTextureName.size() + 1 &&								   // has at least one character after the underscore
-						std::isdigit(static_cast<unsigned char>(baseEntryName[baseTextureName.size() + 1])) && // first character after '_' is a digit
-						entryPath.string() != textureNames[0])												   // not the original base texture itself
-					{
-						groupName = baseTextureName;
+					if (pos == std::string::npos)
 						break;
-					}
+
+					s.resize(pos); // remove the last '_suffix'
 				}
 
-				// for a numeric suffix (e.g. '_01', '_2'), remove it if exists (to derive a group name for searching potential alternative textures, e.g 'boar')
-				if (groupName.empty())
+				// try each prefix and find the one that gives the highest number of matching texture files
+				int bestCount = 0;
+
+				for (int i = 0, n = prefixes.size(); i < n; i++)
 				{
-					auto lastUnderscore = baseTextureName.rfind('_');
+					int count = 0;
+					std::string pref = prefixes[i];
 
-					if (lastUnderscore != std::string::npos)
-					{
-						std::string afterLastUnderscore = baseTextureName.substr(lastUnderscore + 1);
+					// skip single-word prefixes ('puppy' cannot be a group name, otherwise puppy_wolf.png could be an alternative)
+					if (pref.find('_') == std::string::npos)
+						continue;
 
-						if (!afterLastUnderscore.empty() && std::all_of(afterLastUnderscore.begin(), afterLastUnderscore.end(), ::isdigit))
-							groupName = baseTextureName.substr(0, lastUnderscore);
-					}
-				}
-
-				// for a non numeric‑suffix (e.g. '_black'), use the “max‑match” approach to find the best group name
-				if (groupName.empty())
-				{
-					// build a list of all possible prefixes (e.g. 'puppy_black_bear', 'puppy_black', 'puppy')
-					std::vector<std::string> prefixes;
-					std::string s = baseTextureName;
-
-					while (true)
-					{
-						prefixes.push_back(s);
-						auto pos = s.rfind('_');
-
-						if (pos == std::string::npos)
-							break;
-
-						s.resize(pos); // remove the last '_suffix'
-					}
-
-					// try each prefix and find the one that gives the highest number of matching texture files
-					int bestCount = 0;
-
-					for (int i = 0, n = prefixes.size(); i < n; i++)
-					{
-						int count = 0;
-						std::string pref = prefixes[i];
-
-						// skip single-word prefixes ('puppy' cannot be a group name, otherwise puppy_wolf.png could be an alternative)
-						if (pref.find('_') == std::string::npos)
-							continue;
-
-						// loop through each file in the texture directory and count how many .png files start with '<pref>_'
-						for (const std::filesystem::directory_entry &entry : std::filesystem::directory_iterator(texturePath))
-						{
-							if (!entry.is_regular_file())
-								continue;
-
-							std::filesystem::path entryPath = entry.path();
-
-							if (entryPath.extension() != ".png")
-								continue;
-
-							if (entryPath.stem().string().rfind(pref + '_', 0) == 0)
-								count++;
-						}
-
-						// compare and update the best count; if two prefixes match the same number of textures, prefer the longer one
-						if (count > bestCount || (count == bestCount && pref.length() > groupName.length()))
-						{
-							bestCount = count;
-							groupName = pref;
-						}
-					}
-				}
-
-				// finally, collect textures based on the best group name
-				if (!groupName.empty())
-				{
-					std::vector<std::string> found;
-
+					// loop through each file in the texture directory and count how many .png files start with '<pref>_'
 					for (const std::filesystem::directory_entry &entry : std::filesystem::directory_iterator(texturePath))
 					{
 						if (!entry.is_regular_file())
@@ -482,73 +455,100 @@ void Model::load(const char *fpath, glm::mat4 modelMatrix, Sound &sound, bool is
 						if (entryPath.extension() != ".png")
 							continue;
 
-						// skip the file if its name doesn't exactly match the group name, and doesn’t start with the group name followed by an underscore
-						if (!(entryPath.stem().string() == groupName || entryPath.stem().string().rfind(groupName + '_', 0) == 0))
-							continue;
-
-						std::string alternativeTextureName = "data/texture/" + textureSubpath + entryPath.filename().string();
-
-						// skip the original base texture (already in textureNames[0])
-						if (alternativeTextureName == textureNames[0])
-							continue;
-
-						// ensure it is a unique texture name
-						if (std::find(textureNames.begin(), textureNames.end(), alternativeTextureName) == textureNames.end())
-						{
-							found.push_back(alternativeTextureName);
-							alternativeTextureCount++;
-						}
+						if (entryPath.stem().string().rfind(pref + '_', 0) == 0)
+							count++;
 					}
 
-					if (!found.empty())
+					// compare and update the best count; if two prefixes match the same number of textures, prefer the longer one
+					if (count > bestCount || (count == bestCount && pref.length() > groupName.length()))
 					{
-						// append and report
-						textureNames.insert(textureNames.end(), found.begin(), found.end());
-
-						LOG("Found ", found.size(), " alternative(s) for '", groupName, "':");
-
-						for (int i = 0; i < (int)found.size(); i++)
-							LOG("  ", found[i]);
+						bestCount = count;
+						groupName = pref;
 					}
-					else
-						LOG("No alternatives found for group '", groupName, "'");
+				}
+			}
+
+			// finally, collect textures based on the best group name
+			if (!groupName.empty())
+			{
+				std::vector<std::string> found;
+
+				for (const std::filesystem::directory_entry &entry : std::filesystem::directory_iterator(texturePath))
+				{
+					if (!entry.is_regular_file())
+						continue;
+
+					std::filesystem::path entryPath = entry.path();
+
+					if (entryPath.extension() != ".png")
+						continue;
+
+					// skip the file if its name doesn't exactly match the group name, and doesn’t start with the group name followed by an underscore
+					if (!(entryPath.stem().string() == groupName || entryPath.stem().string().rfind(groupName + '_', 0) == 0))
+						continue;
+
+					std::string alternativeTextureName = "data/texture/" + textureSubpath + entryPath.filename().string();
+
+					// skip the original base texture (already in textureNames[0])
+					if (alternativeTextureName == textureNames[0])
+						continue;
+
+					// ensure it is a unique texture name
+					if (std::find(textureNames.begin(), textureNames.end(), alternativeTextureName) == textureNames.end())
+					{
+						found.push_back(alternativeTextureName);
+						alternativeTextureCount++;
+					}
+				}
+
+				if (!found.empty())
+				{
+					// append and report
+					textureNames.insert(textureNames.end(), found.begin(), found.end());
+
+					LOG("Found ", found.size(), " alternative(s) for '", groupName, "':");
+
+					for (int i = 0; i < (int)found.size(); i++)
+						LOG("  ", found[i]);
 				}
 				else
-					LOG("No valid grouping name for '", baseTextureName, "'");
+					LOG("No alternatives found for group '", groupName, "'");
 			}
-
-			// 5. search for sounds
-			sound.searchSoundFiles(fileName, sounds);
-
-			LOG("\nSOUNDS: ", ((sounds.size() != 0) ? sounds.size() : 0));
-
-			for (int i = 0; i < (int)sounds.size(); i++)
-				LOG("[", i + 1, "]  ", sounds[i]);
-		}
-		else // terrain viewer
-		{
-			model = modelMatrix;
-
-			for (int i = 0, n = (int)textureNames.size(); i < n; i++)
-			{
-				std::string &s = textureNames[i];
-
-				if (s.length() <= 4)
-					continue;
-
-				for (char &c : s)
-					c = std::tolower(c);
-
-				if (s.rfind("texture/", 0) == 0)
-					s.erase(0, 8);
-
-				s.replace(s.length() - 4, 4, ".png");
-				s = "data/texture/unsorted/" + s;
-			}
+			else
+				LOG("No valid grouping name for '", baseTextureName, "'");
 		}
 
-		free(DataBuffer);
+		// 5. search for sounds
+		sound.searchSoundFiles(fileName, sounds);
+
+		LOG("\nSOUNDS: ", ((sounds.size() != 0) ? sounds.size() : 0));
+
+		for (int i = 0; i < (int)sounds.size(); i++)
+			LOG("[", i + 1, "]  ", sounds[i]);
 	}
+	else // terrain viewer
+	{
+		model = modelMatrix;
+
+		for (int i = 0, n = (int)textureNames.size(); i < n; i++)
+		{
+			std::string &s = textureNames[i];
+
+			if (s.length() <= 4)
+				continue;
+
+			for (char &c : s)
+				c = std::tolower(c);
+
+			if (s.rfind("texture/", 0) == 0)
+				s.erase(0, 8);
+
+			s.replace(s.length() - 4, 4, ".png");
+			s = "data/texture/unsorted/" + s;
+		}
+	}
+
+	free(DataBuffer);
 
 	delete bdaeFile;
 	delete bdaeArchive;
