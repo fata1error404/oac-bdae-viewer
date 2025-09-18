@@ -1,0 +1,22 @@
+#version 330 core
+layout (location = 0) in vec3 aPos;
+layout (location=  1) in vec3 aNormal;
+layout (location = 2) in vec2 aTexCoord;
+
+out vec3 PosWorldSpace;
+out vec3 Normal;
+out vec2 TexCoord;
+
+uniform mat4 projection;
+uniform mat4 view;
+uniform mat4 model;
+uniform float textureOffset;
+uniform float textureScale;
+
+void main()
+{
+    PosWorldSpace = vec3(model * vec4(aPos, 1.0));
+    Normal = mat3(transpose(inverse(model))) * aNormal;              // apply normal matrix to ..
+    TexCoord = aTexCoord * textureScale + vec2(textureOffset, 0.0);  // animate water by offsetting texture coordinates horizontally
+    gl_Position = projection * view * vec4(PosWorldSpace, 1.0);
+}

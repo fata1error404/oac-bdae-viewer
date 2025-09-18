@@ -313,14 +313,17 @@ int main()
 		glm::mat4 view = ourCamera.GetViewMatrix();
 		glm::mat4 projection = glm::perspective(glm::radians(ourCamera.Zoom), (float)currentWindowWidth / (float)currentWindowHeight, 0.1f, 1000.0f);
 
-		if (!isTerrainViewer)
+		if (!isTerrainViewer && bdaeModel.modelLoaded)
 		{
 			bdaeModel.draw(view, projection, ourCamera.Position, ourLight.showLighting, displayBaseMesh); // render model
 
 			ourLight.draw(view, projection); // render light cube
 		}
-		else
-			terrainModel.draw(view, projection, displayBaseMesh, displayNavMesh); // render terrain
+		else if (terrainModel.terrainLoaded)
+		{
+			terrainModel.draw(view, projection, displayBaseMesh, displayNavMesh);						  // render terrain
+			terrainModel.water.draw(view, projection, ourLight.showLighting, displayBaseMesh, deltaTime); // render water
+		}
 
 		// render settings panel (and file browsing dialog, if open)
 		ImGui::Render();

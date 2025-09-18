@@ -8,6 +8,7 @@
 #include "camera.h"
 #include "sound.h"
 #include "light.h"
+#include "water.h"
 #include "libs/glm/fwd.hpp"
 #include "libs/glm/gtc/type_ptr.hpp"
 #include "libs/glm/gtc/constants.hpp"
@@ -30,6 +31,7 @@ class Terrain
 	Camera &camera;
 	Light &light;
 	Model skybox;
+	Water water;
 	std::string fileName;
 	int fileSize, vertexCount, faceCount, modelCount;
 	unsigned int trnVAO, trnVBO, navVAO, navVBO, phyVAO, phyVBO;
@@ -52,18 +54,14 @@ class Terrain
 	Terrain(Camera &cam, Light &light)
 		: shader("shaders/terrain.vs", "shaders/terrain.fs"),
 		  skybox("shaders/skybox.vs", "shaders/skybox.fs"),
+		  water(cam),
 		  camera(cam),
 		  light(light),
-		  trnVAO(0),
-		  trnVBO(0),
-		  navVAO(0),
-		  navVBO(0),
-		  phyVAO(0),
-		  phyVBO(0),
-		  tileMinX(-1),
-		  tileMinZ(-1),
-		  tileMaxX(1),
-		  tileMaxZ(1),
+		  trnVAO(0), trnVBO(0),
+		  navVAO(0), navVBO(0),
+		  phyVAO(0), phyVBO(0),
+		  tileMinX(-1), tileMinZ(-1),
+		  tileMaxX(1), tileMaxZ(1),
 		  terrainLoaded(false),
 		  navMesh(NULL),
 		  navTriVertexCount(0)
@@ -83,6 +81,8 @@ class Terrain
 	void buildNavigationVertices();
 
 	void buildPhysicsVertices();
+
+	void buildWaterVertices(Water &water);
 
 	void loadTileNavigation(CZipResReader *navigationArchive, int gridX, int gridZ);
 

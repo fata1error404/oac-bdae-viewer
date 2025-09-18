@@ -47,6 +47,17 @@ struct ChunkInfo
 	short texNameIndex3; // 2 bytes  ..
 };
 
+// per-chunk terrain flags
+enum
+{
+	TRNF_VISIBLE = 1 << 0,
+	TRNF_DIRTYLAYER0 = 1 << 1,
+	TRNF_DIRTYLAYER1 = 1 << 2,
+	TRNF_DIRTYLAYER2 = 1 << 3,
+	TRNF_HASWATER = 1 << 16,
+	TRNF_ISHOLE = 1 << 17,
+};
+
 // Class for loading terrain tiles.
 // ________________________________
 

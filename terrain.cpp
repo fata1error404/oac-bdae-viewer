@@ -269,6 +269,7 @@ void Terrain::load(const char *fpath, Sound &sound)
 	// 5. build the physics mesh vertex data in world space coordinates
 	buildNavigationVertices();
 	buildPhysicsVertices();
+	buildWaterVertices(water);
 
 	// load skybox
 	std::string terrainName = std::filesystem::path(fpath).filename().string();
@@ -289,6 +290,64 @@ void Terrain::load(const char *fpath, Sound &sound)
 		std::cout << "[" << i + 1 << "]  " << sounds[i] << std::endl;
 
 	terrainLoaded = true;
+}
+
+void Terrain::buildWaterVertices(Water &water)
+{
+	const float unitsPerChunkX = (float)UnitsInTileRow / ChunksInTileRow;
+	const float unitsPerChunkZ = (float)UnitsInTileCol / ChunksInTileCol;
+	const float nx = 0.0f, ny = 1.0f, nz = 0.0f;
+
+	for (int ti = 0; ti < tilesX; ++ti)
+		for (int tj = 0; tj < tilesZ; ++tj)
+		{
+			TileTerrain *tile = tiles[ti][tj];
+
+			if (!tile || !tile->chunks)
+				continue;
+
+			for (int cz = 0; cz < ChunksInTileCol; ++cz)
+				for (int cx = 0; cx < ChunksInTileRow; ++cx)
+				{
+					ChunkInfo &chunk = tile->chunks[cz * ChunksInTileRow + cx];
+
+					if (!(chunk.flag & TRNF_HASWATER) || chunk.waterLevel == 0 || chunk.waterLevel == -5000)
+						continue;
+
+					float y = chunk.waterLevel * 0.01f;
+					float x0 = tile->startX + cx * unitsPerChunkX;
+					float z0 = tile->startZ + cz * unitsPerChunkZ;
+					float x1 = x0 + unitsPerChunkX;
+					float z1 = z0 + unitsPerChunkZ;
+
+					float u0 = x0, v0 = z0, u1 = x1, v1 = z1;
+
+					std::initializer_list<float> quad = {
+						x0, y, z0, nx, ny, nz, u0, v0,
+						x1, y, z0, nx, ny, nz, u1, v0,
+						x1, y, z1, nx, ny, nz, u1, v1,
+
+						x0, y, z0, nx, ny, nz, u0, v0,
+						x1, y, z1, nx, ny, nz, u1, v1,
+						x0, y, z1, nx, ny, nz, u0, v1};
+					water.vertices.insert(water.vertices.end(), quad);
+				}
+		}
+
+	glGenVertexArrays(1, &water.VAO);
+	glGenBuffers(1, &water.VBO);
+
+	glBindVertexArray(water.VAO);
+	glBindBuffer(GL_ARRAY_BUFFER, water.VBO);
+	glBufferData(GL_ARRAY_BUFFER, water.vertices.size() * sizeof(float), water.vertices.empty() ? nullptr : water.vertices.data(), GL_STATIC_DRAW);
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)0);
+	glEnableVertexAttribArray(1);
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(3 * sizeof(float)));
+	glEnableVertexAttribArray(2);
+	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(6 * sizeof(float)));
+
+	glBindVertexArray(0);
 }
 
 // Load Nav Mesh if exists
@@ -761,6 +820,8 @@ void Terrain::buildPhysicsVertices()
 //! Clears GPU memory and resets viewer state.
 void Terrain::reset()
 {
+	terrainLoaded = false;
+
 	tileMinX = tileMinZ = 1000;
 	tileMaxX = tileMaxZ = -1000;
 	tilesX = tilesZ = 0;
@@ -792,9 +853,11 @@ void Terrain::reset()
 	physicsVertices.clear();
 	sounds.clear();
 
-	delete navMesh;
-
-	terrainLoaded = false;
+	if (navMesh)
+	{
+		delete navMesh;
+		navMesh = NULL;
+	}
 }
 
 //! Renders terrain and physics geometry meshes.

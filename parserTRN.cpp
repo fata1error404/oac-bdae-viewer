@@ -97,6 +97,18 @@ TileTerrain *TileTerrain::load(IReadResFile *trnFile, int &gridX, int &gridZ, Te
 				tileTerrain->chunks[index].texNameIndex3 = newTexNameIndex[tileTerrain->chunks[index].texNameIndex3];
 		}
 	}
+#else
+	int chunkOffset = sizeof(TRNFileHeader);
+
+	for (int index = 0, i = 0; i < ChunksInTileRow; i++)
+	{
+		for (int j = 0; j < ChunksInTileCol; j++, index++)
+		{
+			ChunkInfo *chunk = (ChunkInfo *)(buffer + chunkOffset);
+			tileTerrain->chunks[index] = *chunk;
+			chunkOffset += sizeof(ChunkInfo);
+		}
+	}
 #endif
 
 	// 5. parse height map

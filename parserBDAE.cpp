@@ -614,6 +614,8 @@ void Model::load(const char *fpath, glm::mat4 modelMatrix, Sound &sound, bool is
 //! Clears GPU memory and resets viewer state.
 void Model::reset()
 {
+	modelLoaded = false;
+
 	glDeleteVertexArrays(1, &VAO);
 	glDeleteBuffers(1, &VBO);
 
@@ -638,13 +640,14 @@ void Model::reset()
 	sounds.clear();
 
 	fileSize = vertexCount = faceCount = textureCount = alternativeTextureCount = selectedTexture = totalSubmeshCount = 0;
-
-	modelLoaded = false;
 }
 
 //! Renders .bdae model.
 void Model::draw(glm::mat4 view, glm::mat4 projection, glm::vec3 cameraPos, bool lighting, bool simple)
 {
+	if (!modelLoaded)
+		return;
+
 	if (meshCenter != glm::vec3(-1.0f)) // = if using 3D model viewer, where mesh center is initialized
 	{
 		model = glm::mat4(1.0f);
