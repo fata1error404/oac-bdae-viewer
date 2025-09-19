@@ -124,7 +124,6 @@ class Camera
 		inputDir = glm::vec3(0.0f);
 	}
 
-  private:
 	//! Calculates the new Front vector from the camera's updated Euler Angles, and also updates Right and Up vectors (private helper function, not for external use).
 	void updateCameraVectors()
 	{

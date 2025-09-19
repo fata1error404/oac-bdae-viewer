@@ -276,6 +276,54 @@ void Terrain::load(const char *fpath, Sound &sound)
 	std::string skyboxName = "model/skybox/" + terrainName.replace(terrainName.size() - 4, 4, "") + ".bdae";
 	skybox.load(skyboxName.c_str(), glm::mat4(1.0f), sound, true);
 
+	// set spawn pos
+	std::cout << terrainName << std::endl;
+
+	if (terrainName == "pvp_eristar_ruin")
+	{
+		camera.Position = glm::vec3(-125, 85, 160);
+		camera.Pitch = -50.0f;
+		camera.Yaw = 0.0f;
+	}
+	else if (terrainName == "pvp_on_street")
+	{
+		camera.Position = glm::vec3(95, 70, 250);
+		camera.Pitch = -35.0f;
+		camera.Yaw = -50.0f;
+	}
+	else if (terrainName == "pvp_west_wood")
+	{
+		camera.Position = glm::vec3(40, 30, 110);
+		camera.Pitch = -35.0f;
+		camera.Yaw = -100.0f;
+	}
+	else if (terrainName == "swamp_eye")
+	{
+		camera.Position = glm::vec3(-200, 100, 210);
+		camera.Pitch = -25.0f;
+		camera.Yaw = -40.0f;
+	}
+	else if (terrainName == "knahswahs_jail")
+	{
+		camera.Position = glm::vec3(-475, 140, -2050);
+		camera.Pitch = -30.0f;
+		camera.Yaw = -125.0f;
+	}
+	else if (terrainName == "west_land")
+	{
+		camera.Position = glm::vec3(-2600, 120, 195);
+		camera.Pitch = -30.0f;
+		camera.Yaw = -130.0f;
+	}
+	else if (terrainName == "sandbox")
+	{
+		camera.Position = glm::vec3(1110, 10, 700);
+		camera.Pitch = 0.0f;
+		camera.Yaw = 70.0f;
+	}
+
+	camera.updateCameraVectors();
+
 	// set file info to be displayed in the settings panel
 	fileName = std::filesystem::path(fpath).filename().string();
 	fileSize = std::filesystem::file_size(fpath);
