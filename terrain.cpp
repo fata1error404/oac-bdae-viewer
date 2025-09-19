@@ -13,368 +13,317 @@
 #include "libs/glm/gtc/type_precision.hpp"
 #include "parserITM.h"
 
-//! Loads .zip file from disk, performs parsing for each contained .trn file, sets up terrain mesh data and sound.
+static inline long long makeTileKey(int tx, int tz)
+{
+	return (((long long)tx) << 32) | ((long long)((unsigned)tz) & 0xffffffffULL);
+}
+
+bool Terrain::peekTileCoordsFromTrn(IReadResFile *trnFile, int &gridX, int &gridZ)
+{
+	if (!trnFile)
+		return false;
+
+	// ensure we read from the start
+	trnFile->seek(0);
+
+	int size = trnFile->getSize();
+	if (size < (int)sizeof(TRNFileHeader))
+		return false; // file too small
+
+	// read header bytes only
+	unsigned char headerBuf[sizeof(TRNFileHeader)];
+	trnFile->read(headerBuf, sizeof(TRNFileHeader));
+
+	// copy into typed struct to avoid strict-aliasing/unaligned access
+	TRNFileHeader header;
+	std::memcpy(&header, headerBuf, sizeof(TRNFileHeader));
+
+	// optional: verify signature (helps avoid false positives)
+	// signature expected to be 'ATIL' according to TRNFileHeader comment
+	const char expectedSig[4] = {'A', 'T', 'I', 'L'};
+	if (std::memcmp(header.signature, expectedSig, 4) != 0)
+	{
+		// signature mismatch -> still possible older/newer format, but reject by default
+		return false;
+	}
+
+	gridX = header.gridX;
+	gridZ = header.gridZ;
+
+	return true;
+}
+
 void Terrain::load(const char *fpath, Sound &sound)
 {
 	reset();
 
-	// process archive with .trn files and store map's tile data in a temporary vector of TileTerrain objects (we cannot just push back a loaded tile to the main 2D vector; at the same time, we cannot resize it, since dimensions of the terrain are yet unknown)
+	// keep the archive readers open for later on-demand loads
+	terrainArchive = new CZipResReader(fpath, true, false);
 
-	struct tmp_TileTerrain
+	// construct related archive names
+	std::string itemsPath = std::string(fpath);
+	itemsPath.replace(itemsPath.size() - 4, 4, ".itm");
+	itemsArchive = new CZipResReader(itemsPath.c_str(), true, false);
+
+	std::string navPath = std::string(fpath);
+	navPath.replace(navPath.size() - 4, 4, ".nav");
+	navigationArchive = new CZipResReader(navPath.c_str(), true, false);
+
+	physicsArchive = new CZipResReader("data/terrain/physics.zip", true, false);
+
+	// scan archive to discover tile bounds and build trnIndexByCoord
+	int fileCount = terrainArchive->getFileCount();
+	trnIndexByCoord.clear();
+
+	tileMinX = tileMinZ = 100000;
+	tileMaxX = tileMaxZ = -100000;
+
+	for (int i = 0; i < fileCount; ++i)
 	{
-		int tileX;
-		int tileZ;
-		TileTerrain *tileData;
-	};
+		IReadResFile *f = terrainArchive->openFile(i);
 
-	std::vector<tmp_TileTerrain> tmp_tiles;
+		if (!f)
+			continue;
 
-	CZipResReader *terrainArchive = new CZipResReader(fpath, true, false);
+		int tx = 0, tz = 0;
+		bool ok = false;
 
-	CZipResReader *itemsArchive = new CZipResReader(std::string(fpath).replace(std::strlen(fpath) - 4, 4, ".itm").c_str(), true, false);
+		// Try to peek tile coords cheaply (implement this helper for your .trn).
+		if (peekTileCoordsFromTrn(f, tx, tz))
+			ok = true;
 
-	CZipResReader *navigationArchive = new CZipResReader(std::string(fpath).replace(std::strlen(fpath) - 4, 4, ".nav").c_str(), true, false);
+		f->drop();
 
-	CZipResReader *physicsArchive = new CZipResReader("data/terrain/physics.zip", true, false);
-
-	navMesh = new dtNavMesh();
-
-	for (int i = 0, n = terrainArchive->getFileCount(); i < n; i++)
-	{
-		IReadResFile *trnFile = terrainArchive->openFile(i); // open i-th .trn file inside the archive and return memory-read file object with the decompressed content
-
-		if (trnFile)
+		if (ok)
 		{
-			int tileX, tileZ;													 // variables that will be assigned tile's position on the grid
-			TileTerrain *tile = TileTerrain::load(trnFile, tileX, tileZ, *this); // .trn: load tile's terrain mesh data
-			loadTileEntities(itemsArchive, physicsArchive, tileX, tileZ, tile, *this);
-			loadTileNavigation(navigationArchive, tileX, tileZ);
+			// update bounds
+			tileMinX = std::min(tileMinX, tx);
+			tileMaxX = std::max(tileMaxX, tx);
+			tileMinZ = std::min(tileMinZ, tz);
+			tileMaxZ = std::max(tileMaxZ, tz);
 
-			if (tile)
-			{
-				tmp_tiles.push_back(tmp_TileTerrain{tileX, tileZ, tile});
-
-				// update Class variables that track the min and max tile indices (grid borders)
-				if (tileX < tileMinX)
-					tileMinX = tileX;
-				if (tileX > tileMaxX)
-					tileMaxX = tileX;
-				if (tileZ < tileMinZ)
-					tileMinZ = tileZ;
-				if (tileZ > tileMaxZ)
-					tileMaxZ = tileZ;
-			}
-
-			trnFile->drop();
+			trnIndexByCoord.emplace(makeTileKey(tx, tz), i);
 		}
 	}
 
-	delete terrainArchive;
-	delete itemsArchive;
-	delete navigationArchive;
-	delete physicsArchive;
-
-	/* initialize Class variables inside the Terrain object
-		– terrain borders
-		– terrain size
-		– map's tile data */
-
-	// terrain borders in world space coordinates
-	minX = (float)tileMinX * ChunksInTile;
-	minZ = (float)tileMinZ * ChunksInTile;
-	maxX = (float)tileMaxX * ChunksInTile;
-	maxZ = (float)tileMaxZ * ChunksInTile;
-
-	// 2D array for storing data of all tiles on the terrain
-	// (basically 1D temp tmp_tiles vector is converted into a 2D array)
-	tilesX = (tileMaxX - tileMinX) + 1; // number of tiles in X direction
-	tilesZ = (tileMaxZ - tileMinZ) + 1; // number of tiles in Z direction
-
-	tiles.assign(tilesX, std::vector<TileTerrain *>(tilesZ, NULL)); // resize to terrain dimensions
-
-	for (int i = 0, n = tmp_tiles.size(); i < n; i++)
+	if (tileMaxX < tileMinX || tileMaxZ < tileMinZ)
 	{
-		int indexX = tmp_tiles[i].tileX - tileMinX; // convert from [-128, 127] range to [0, 255]
-		int indexZ = tmp_tiles[i].tileZ - tileMinZ;
-		tiles[indexX][indexZ] = tmp_tiles[i].tileData;
+		// no tiles discovered — treat as empty
+		tilesX = tilesZ = 0;
+		terrainLoaded = true;
+		sound.searchSoundFiles(std::filesystem::path(fpath).filename().string(), sounds);
+		return;
 	}
 
-	tmp_tiles.clear();
+	tilesX = (tileMaxX - tileMinX) + 1;
+	tilesZ = (tileMaxZ - tileMinZ) + 1;
 
-	// build vertex data in world space coordinates
-	getTerrainVertices();
+	// allocate tiles grid but leave pointers null (we'll fill them on demand)
+	tiles.assign(tilesX, std::vector<TileTerrain *>(tilesZ, nullptr));
+	tileState.assign(tilesX, std::vector<TileLoadState>(tilesZ, TileLoadState::Unloaded));
 
-	getNavigationVertices();
-
-	getPhysicsVertices();
-
-	getWaterVertices();
-
-	// load skybox
-	std::string terrainName = std::filesystem::path(fpath).filename().string();
-	std::string skyboxName = "model/skybox/" + terrainName.replace(terrainName.size() - 4, 4, "") + ".bdae";
-	skybox.load(skyboxName.c_str(), glm::mat4(1.0f), sound, true);
-
-	// set camera starting point
-	if (terrainName == "pvp_eristar_ruin")
-	{
-		camera.Position = glm::vec3(-125, 85, 160);
-		camera.Pitch = -50.0f;
-		camera.Yaw = 0.0f;
-	}
-	else if (terrainName == "pvp_on_street")
-	{
-		camera.Position = glm::vec3(95, 70, 250);
-		camera.Pitch = -35.0f;
-		camera.Yaw = -50.0f;
-	}
-	else if (terrainName == "pvp_west_wood")
-	{
-		camera.Position = glm::vec3(40, 30, 110);
-		camera.Pitch = -35.0f;
-		camera.Yaw = -100.0f;
-	}
-	else if (terrainName == "swamp_eye")
-	{
-		camera.Position = glm::vec3(-200, 100, 210);
-		camera.Pitch = -25.0f;
-		camera.Yaw = -40.0f;
-	}
-	else if (terrainName == "knahswahs_jail")
-	{
-		camera.Position = glm::vec3(-475, 140, -2050);
-		camera.Pitch = -30.0f;
-		camera.Yaw = -125.0f;
-	}
-	else if (terrainName == "west_land")
-	{
-		camera.Position = glm::vec3(-2600, 120, 195);
-		camera.Pitch = -30.0f;
-		camera.Yaw = -130.0f;
-	}
-	else if (terrainName == "sandbox")
-	{
-		camera.Position = glm::vec3(1110, 10, 700);
-		camera.Pitch = 0.0f;
-		camera.Yaw = 70.0f;
-	}
-
-	camera.updateCameraVectors();
-
-	// set file info to be displayed in the settings panel
-	fileName = std::filesystem::path(fpath).filename().string();
-	fileSize = std::filesystem::file_size(fpath);
-	vertexCount = 0;
-	faceCount = 0;
-
-	sound.searchSoundFiles(fileName, sounds);
+	// load sounds only
+	sound.searchSoundFiles(std::filesystem::path(fpath).filename().string(), sounds);
 
 	terrainLoaded = true;
 }
 
-void Terrain::getTerrainVertices()
+void Terrain::getTerrainVertices(TileTerrain *tile)
 {
 	static const int FLOATS_PER_TERR_VERTEX = 18;
 
-	// 3. build the terrain mesh vertex data in world space coordinates (structured as triangles, which is optimal for rendering terrain surface; 1D vector with the following format: x1, y1, z1, x2, y2, z2, .. )
+	if (!tile)
+		return;
 
-	// loop through each tile in the terrain
-	for (int i = 0; i < tilesX; i++)
+	if (tile->trnVAO)
 	{
-		for (int j = 0; j < tilesZ; j++)
+		glDeleteVertexArrays(1, &tile->trnVAO);
+		tile->trnVAO = 0;
+	}
+	if (tile->trnVBO)
+	{
+		glDeleteBuffers(1, &tile->trnVBO);
+		tile->trnVBO = 0;
+	}
+
+	// Reserve approx size: UnitsInTileCol * UnitsInTileRow * 6 vertices * floatsPerVertex
+	// (6 vertices per unit because 2 triangles × 3 verts)
+	size_t approxVerts = (size_t)UnitsInTileCol * (size_t)UnitsInTileRow * FLOATS_PER_TERR_VERTEX;
+	tile->terrainVertices.clear();
+	tile->terrainVertices.reserve(approxVerts * 6);
+
+	for (int col = 0; col < UnitsInTileCol; ++col)
+	{
+		for (int row = 0; row < UnitsInTileRow; ++row)
 		{
-			if (!tiles[i][j])
-				continue;
+			float x0 = tile->startX + (float)col;
+			float x1 = tile->startX + (float)(col + 1);
+			float z0 = tile->startZ + (float)row;
+			float z1 = tile->startZ + (float)(row + 1);
 
-			TileTerrain *t = tiles[i][j];
+			float y00 = tile->Y[row][col];
+			float y10 = tile->Y[row][col + 1];
+			float y01 = tile->Y[row + 1][col];
+			float y11 = tile->Y[row + 1][col + 1];
 
-			// Reserve approx size: UnitsInTileCol * UnitsInTileRow * 6 vertices * floatsPerVertex
-			// (6 vertices per unit because 2 triangles × 3 verts)
-			size_t approxVerts = (size_t)UnitsInTileCol * (size_t)UnitsInTileRow * FLOATS_PER_TERR_VERTEX;
-			t->terrainVertices.clear();
-			t->terrainVertices.reserve(approxVerts * 6);
+			float u0 = 0.0f, u1 = 1.0f;
+			float v0 = 0.0f, v1 = 1.0f;
 
-			for (int col = 0; col < UnitsInTileCol; ++col)
+			int chunkCol = col / 8;
+			int chunkRow = row / 8;
+			ChunkInfo &chunk = tile->chunks[chunkRow * 8 + chunkCol];
+			int tex1 = chunk.texNameIndex1;
+			int tex2 = chunk.texNameIndex2;
+			int tex3 = chunk.texNameIndex3;
+
+			auto unpack_blend = [](glm::u8vec4 rgba) -> std::array<float, 4>
 			{
-				for (int row = 0; row < UnitsInTileRow; ++row)
-				{
-					float x0 = t->startX + (float)col;
-					float x1 = t->startX + (float)(col + 1);
-					float z0 = t->startZ + (float)row;
-					float z1 = t->startZ + (float)(row + 1);
+				return {
+					rgba.r / 255.0f,
+					rgba.g / 255.0f,
+					rgba.b / 255.0f,
+					rgba.a / 255.0f};
+			};
 
-					float y00 = t->Y[row][col];
-					float y10 = t->Y[row][col + 1];
-					float y01 = t->Y[row + 1][col];
-					float y11 = t->Y[row + 1][col + 1];
+			auto blend00 = unpack_blend(tile->colors[row][col]);
+			auto blend10 = unpack_blend(tile->colors[row][col + 1]);
+			auto blend01 = unpack_blend(tile->colors[row + 1][col]);
+			auto blend11 = unpack_blend(tile->colors[row + 1][col + 1]);
 
-					float u0 = 0.0f, u1 = 1.0f;
-					float v0 = 0.0f, v1 = 1.0f;
+			glm::vec3 n00 = tile->normals[row][col];
+			glm::vec3 n10 = tile->normals[row][col + 1];
+			glm::vec3 n01 = tile->normals[row + 1][col];
+			glm::vec3 n11 = tile->normals[row + 1][col + 1];
 
-					int chunkCol = col / 8;
-					int chunkRow = row / 8;
-					ChunkInfo &chunk = t->chunks[chunkRow * 8 + chunkCol];
-					int tex1 = chunk.texNameIndex1;
-					int tex2 = chunk.texNameIndex2;
-					int tex3 = chunk.texNameIndex3;
+			// === First Triangle ===
+			tile->terrainVertices.insert(tile->terrainVertices.end(), {x0, y00, z0, 1.0f, 0.0f, 0.0f, u0, v0,
+																	   (float)tex1, (float)tex2, (float)tex3,
+																	   blend00[0], blend00[1], blend00[2], blend00[3],
+																	   n00.x, n00.y, n00.z});
 
-					auto unpack_blend = [](glm::u8vec4 rgba) -> std::array<float, 4>
-					{
-						return {
-							rgba.r / 255.0f,
-							rgba.g / 255.0f,
-							rgba.b / 255.0f,
-							rgba.a / 255.0f};
-					};
+			tile->terrainVertices.insert(tile->terrainVertices.end(), {x0, y01, z1, 0.0f, 1.0f, 0.0f, u0, v1,
+																	   (float)tex1, (float)tex2, (float)tex3,
+																	   blend01[0], blend01[1], blend01[2], blend01[3],
+																	   n01.x, n01.y, n01.z});
 
-					auto blend00 = unpack_blend(t->colors[row][col]);
-					auto blend10 = unpack_blend(t->colors[row][col + 1]);
-					auto blend01 = unpack_blend(t->colors[row + 1][col]);
-					auto blend11 = unpack_blend(t->colors[row + 1][col + 1]);
+			tile->terrainVertices.insert(tile->terrainVertices.end(), {x1, y11, z1, 0.0f, 0.0f, 1.0f, u1, v1,
+																	   (float)tex1, (float)tex2, (float)tex3,
+																	   blend11[0], blend11[1], blend11[2], blend11[3],
+																	   n11.x, n11.y, n11.z});
 
-					glm::vec3 n00 = t->normals[row][col];
-					glm::vec3 n10 = t->normals[row][col + 1];
-					glm::vec3 n01 = t->normals[row + 1][col];
-					glm::vec3 n11 = t->normals[row + 1][col + 1];
+			// === Second Triangle ===
+			tile->terrainVertices.insert(tile->terrainVertices.end(), {x0, y00, z0, 1.0f, 0.0f, 0.0f, u0, v0,
+																	   (float)tex1, (float)tex2, (float)tex3,
+																	   blend00[0], blend00[1], blend00[2], blend00[3],
+																	   n00.x, n00.y, n00.z});
 
-					// === First Triangle ===
-					t->terrainVertices.insert(t->terrainVertices.end(), {x0, y00, z0, 1.0f, 0.0f, 0.0f, u0, v0,
-																		 (float)tex1, (float)tex2, (float)tex3,
-																		 blend00[0], blend00[1], blend00[2], blend00[3],
-																		 n00.x, n00.y, n00.z});
+			tile->terrainVertices.insert(tile->terrainVertices.end(), {x1, y11, z1, 0.0f, 0.0f, 1.0f, u1, v1,
+																	   (float)tex1, (float)tex2, (float)tex3,
+																	   blend11[0], blend11[1], blend11[2], blend11[3],
+																	   n11.x, n11.y, n11.z});
 
-					t->terrainVertices.insert(t->terrainVertices.end(), {x0, y01, z1, 0.0f, 1.0f, 0.0f, u0, v1,
-																		 (float)tex1, (float)tex2, (float)tex3,
-																		 blend01[0], blend01[1], blend01[2], blend01[3],
-																		 n01.x, n01.y, n01.z});
-
-					t->terrainVertices.insert(t->terrainVertices.end(), {x1, y11, z1, 0.0f, 0.0f, 1.0f, u1, v1,
-																		 (float)tex1, (float)tex2, (float)tex3,
-																		 blend11[0], blend11[1], blend11[2], blend11[3],
-																		 n11.x, n11.y, n11.z});
-
-					// === Second Triangle ===
-					t->terrainVertices.insert(t->terrainVertices.end(), {x0, y00, z0, 1.0f, 0.0f, 0.0f, u0, v0,
-																		 (float)tex1, (float)tex2, (float)tex3,
-																		 blend00[0], blend00[1], blend00[2], blend00[3],
-																		 n00.x, n00.y, n00.z});
-
-					t->terrainVertices.insert(t->terrainVertices.end(), {x1, y11, z1, 0.0f, 0.0f, 1.0f, u1, v1,
-																		 (float)tex1, (float)tex2, (float)tex3,
-																		 blend11[0], blend11[1], blend11[2], blend11[3],
-																		 n11.x, n11.y, n11.z});
-
-					t->terrainVertices.insert(t->terrainVertices.end(), {x1, y10, z0, 0.0f, 1.0f, 0.0f, u1, v0,
-																		 (float)tex1, (float)tex2, (float)tex3,
-																		 blend10[0], blend10[1], blend10[2], blend10[3],
-																		 n10.x, n10.y, n10.z});
-				}
-			}
-
-			// compute vertex count (every vertex = 18 floats)
-			if (t->terrainVertices.empty())
-				t->terrainVertexCount = 0;
-			else
-				t->terrainVertexCount = (int)(t->terrainVertices.size() / FLOATS_PER_TERR_VERTEX);
-
-			// Upload to GPU (must be on GL thread/context)
-			if (!t->terrainVertices.empty())
-			{
-				glGenVertexArrays(1, &t->trnVAO);
-				glGenBuffers(1, &t->trnVBO);
-
-				glBindVertexArray(t->trnVAO);
-				glBindBuffer(GL_ARRAY_BUFFER, t->trnVBO);
-				GLsizeiptr bufSize = (GLsizeiptr)(t->terrainVertices.size() * sizeof(float));
-				glBufferData(GL_ARRAY_BUFFER, bufSize, t->terrainVertices.data(), GL_STATIC_DRAW);
-
-				// attribute layout (same as original)
-				glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, FLOATS_PER_TERR_VERTEX * sizeof(float), (void *)0);
-				glEnableVertexAttribArray(0);
-
-				glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, FLOATS_PER_TERR_VERTEX * sizeof(float), (void *)(3 * sizeof(float)));
-				glEnableVertexAttribArray(1);
-
-				glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, FLOATS_PER_TERR_VERTEX * sizeof(float), (void *)(6 * sizeof(float)));
-				glEnableVertexAttribArray(2);
-
-				glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, FLOATS_PER_TERR_VERTEX * sizeof(float), (void *)(8 * sizeof(float)));
-				glEnableVertexAttribArray(3);
-
-				glVertexAttribPointer(4, 4, GL_FLOAT, GL_FALSE, FLOATS_PER_TERR_VERTEX * sizeof(float), (void *)(11 * sizeof(float)));
-				glEnableVertexAttribArray(4);
-
-				glVertexAttribPointer(5, 3, GL_FLOAT, GL_FALSE, FLOATS_PER_TERR_VERTEX * sizeof(float), (void *)(15 * sizeof(float)));
-				glEnableVertexAttribArray(5);
-
-				glBindVertexArray(0);
-			}
+			tile->terrainVertices.insert(tile->terrainVertices.end(), {x1, y10, z0, 0.0f, 1.0f, 0.0f, u1, v0,
+																	   (float)tex1, (float)tex2, (float)tex3,
+																	   blend10[0], blend10[1], blend10[2], blend10[3],
+																	   n10.x, n10.y, n10.z});
 		}
+	}
+
+	// compute vertex count (every vertex = 18 floats)
+	if (tile->terrainVertices.empty())
+		tile->terrainVertexCount = 0;
+	else
+		tile->terrainVertexCount = (int)(tile->terrainVertices.size() / FLOATS_PER_TERR_VERTEX);
+
+	// Upload to GPU (must be on GL thread/context)
+	if (!tile->terrainVertices.empty())
+	{
+		glGenVertexArrays(1, &tile->trnVAO);
+		glGenBuffers(1, &tile->trnVBO);
+
+		glBindVertexArray(tile->trnVAO);
+		glBindBuffer(GL_ARRAY_BUFFER, tile->trnVBO);
+		GLsizeiptr bufSize = (GLsizeiptr)(tile->terrainVertices.size() * sizeof(float));
+		glBufferData(GL_ARRAY_BUFFER, bufSize, tile->terrainVertices.data(), GL_STATIC_DRAW);
+
+		// attribute layout (same as original)
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, FLOATS_PER_TERR_VERTEX * sizeof(float), (void *)0);
+		glEnableVertexAttribArray(0);
+
+		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, FLOATS_PER_TERR_VERTEX * sizeof(float), (void *)(3 * sizeof(float)));
+		glEnableVertexAttribArray(1);
+
+		glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, FLOATS_PER_TERR_VERTEX * sizeof(float), (void *)(6 * sizeof(float)));
+		glEnableVertexAttribArray(2);
+
+		glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, FLOATS_PER_TERR_VERTEX * sizeof(float), (void *)(8 * sizeof(float)));
+		glEnableVertexAttribArray(3);
+
+		glVertexAttribPointer(4, 4, GL_FLOAT, GL_FALSE, FLOATS_PER_TERR_VERTEX * sizeof(float), (void *)(11 * sizeof(float)));
+		glEnableVertexAttribArray(4);
+
+		glVertexAttribPointer(5, 3, GL_FLOAT, GL_FALSE, FLOATS_PER_TERR_VERTEX * sizeof(float), (void *)(15 * sizeof(float)));
+		glEnableVertexAttribArray(5);
+
+		glBindVertexArray(0);
 	}
 }
 
-void Terrain::getWaterVertices()
+void Terrain::getWaterVertices(TileTerrain *tile)
 {
 	const float unitsPerChunkX = (float)UnitsInTileRow / ChunksInTileRow;
 	const float unitsPerChunkZ = (float)UnitsInTileCol / ChunksInTileCol;
 	const float nx = 0.0f, ny = 1.0f, nz = 0.0f;
 
-	for (int ti = 0; ti < tilesX; ++ti)
-	{
-		for (int tj = 0; tj < tilesZ; ++tj)
-		{
-			TileTerrain *tile = tiles[ti][tj];
+	if (!tile || !tile->chunks)
+		return;
 
-			if (!tile || !tile->chunks)
+	for (int cz = 0; cz < ChunksInTileCol; ++cz)
+	{
+		for (int cx = 0; cx < ChunksInTileRow; ++cx)
+		{
+			ChunkInfo &chunk = tile->chunks[cz * ChunksInTileRow + cx];
+
+			if (!(chunk.flag & TRNF_HASWATER) || chunk.waterLevel == 0 || chunk.waterLevel == -5000)
 				continue;
 
-			for (int cz = 0; cz < ChunksInTileCol; ++cz)
-			{
-				for (int cx = 0; cx < ChunksInTileRow; ++cx)
-				{
-					ChunkInfo &chunk = tile->chunks[cz * ChunksInTileRow + cx];
+			float y = chunk.waterLevel * 0.01f;
+			float x0 = tile->startX + cx * unitsPerChunkX;
+			float z0 = tile->startZ + cz * unitsPerChunkZ;
+			float x1 = x0 + unitsPerChunkX;
+			float z1 = z0 + unitsPerChunkZ;
 
-					if (!(chunk.flag & TRNF_HASWATER) || chunk.waterLevel == 0 || chunk.waterLevel == -5000)
-						continue;
+			float u0 = x0, v0 = z0, u1 = x1, v1 = z1;
 
-					float y = chunk.waterLevel * 0.01f;
-					float x0 = tile->startX + cx * unitsPerChunkX;
-					float z0 = tile->startZ + cz * unitsPerChunkZ;
-					float x1 = x0 + unitsPerChunkX;
-					float z1 = z0 + unitsPerChunkZ;
+			std::initializer_list<float> quad = {
+				x0, y, z0, nx, ny, nz, u0, v0,
+				x1, y, z0, nx, ny, nz, u1, v0,
+				x1, y, z1, nx, ny, nz, u1, v1,
 
-					float u0 = x0, v0 = z0, u1 = x1, v1 = z1;
-
-					std::initializer_list<float> quad = {
-						x0, y, z0, nx, ny, nz, u0, v0,
-						x1, y, z0, nx, ny, nz, u1, v0,
-						x1, y, z1, nx, ny, nz, u1, v1,
-
-						x0, y, z0, nx, ny, nz, u0, v0,
-						x1, y, z1, nx, ny, nz, u1, v1,
-						x0, y, z1, nx, ny, nz, u0, v1};
-					tile->water.vertices.insert(tile->water.vertices.end(), quad);
-				}
-			}
-
-			tile->water.waterVertexCount = tile->water.vertices.size() / 8;
-
-			glGenVertexArrays(1, &tile->water.VAO);
-			glGenBuffers(1, &tile->water.VBO);
-
-			glBindVertexArray(tile->water.VAO);
-			glBindBuffer(GL_ARRAY_BUFFER, tile->water.VBO);
-			glBufferData(GL_ARRAY_BUFFER, tile->water.vertices.size() * sizeof(float), tile->water.vertices.empty() ? nullptr : tile->water.vertices.data(), GL_STATIC_DRAW);
-			glEnableVertexAttribArray(0);
-			glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)0);
-			glEnableVertexAttribArray(1);
-			glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(3 * sizeof(float)));
-			glEnableVertexAttribArray(2);
-			glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(6 * sizeof(float)));
-
-			glBindVertexArray(0);
+				x0, y, z0, nx, ny, nz, u0, v0,
+				x1, y, z1, nx, ny, nz, u1, v1,
+				x0, y, z1, nx, ny, nz, u0, v1};
+			tile->water.vertices.insert(tile->water.vertices.end(), quad);
 		}
 	}
+
+	tile->water.waterVertexCount = tile->water.vertices.size() / 8;
+
+	glGenVertexArrays(1, &tile->water.VAO);
+	glGenBuffers(1, &tile->water.VBO);
+
+	glBindVertexArray(tile->water.VAO);
+	glBindBuffer(GL_ARRAY_BUFFER, tile->water.VBO);
+	glBufferData(GL_ARRAY_BUFFER, tile->water.vertices.size() * sizeof(float), tile->water.vertices.empty() ? nullptr : tile->water.vertices.data(), GL_STATIC_DRAW);
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)0);
+	glEnableVertexAttribArray(1);
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(3 * sizeof(float)));
+	glEnableVertexAttribArray(2);
+	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(6 * sizeof(float)));
+
+	glBindVertexArray(0);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
 // Load Nav Mesh if exists
@@ -451,7 +400,7 @@ struct EdgeInfo
 	float bx, by, bz;
 };
 
-void Terrain::getNavigationVertices()
+void Terrain::getNavigationVertices(TileTerrain *tile)
 {
 	if (!navMesh)
 		return;
@@ -589,18 +538,18 @@ void Terrain::getNavigationVertices()
 			if (t)
 			{
 				// move new vertices into the tile
-				t->navigationVertices = std::move(tileNavVerts);
-				t->navmeshVertexCount = triVertexCounter;
+				tile->navigationVertices = std::move(tileNavVerts);
+				tile->navmeshVertexCount = triVertexCounter;
 
 				// upload GL buffers for this tile
-				if (!t->navigationVertices.empty())
+				if (!tile->navigationVertices.empty())
 				{
-					glGenVertexArrays(1, &t->navVAO);
-					glGenBuffers(1, &t->navVBO);
-					glBindVertexArray(t->navVAO);
-					glBindBuffer(GL_ARRAY_BUFFER, t->navVBO);
-					GLsizeiptr bufSize = (GLsizeiptr)(t->navigationVertices.size() * sizeof(float));
-					glBufferData(GL_ARRAY_BUFFER, bufSize, t->navigationVertices.data(), GL_STATIC_DRAW);
+					glGenVertexArrays(1, &tile->navVAO);
+					glGenBuffers(1, &tile->navVBO);
+					glBindVertexArray(tile->navVAO);
+					glBindBuffer(GL_ARRAY_BUFFER, tile->navVBO);
+					GLsizeiptr bufSize = (GLsizeiptr)(tile->navigationVertices.size() * sizeof(float));
+					glBufferData(GL_ARRAY_BUFFER, bufSize, tile->navigationVertices.data(), GL_STATIC_DRAW);
 					glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
 					glEnableVertexAttribArray(0);
 					glBindVertexArray(0);
@@ -627,264 +576,326 @@ void Terrain::getNavigationVertices()
 }
 
 //! Returns a single vector partitioned into [0…fillVerts) = triangles, [fillVerts…end) = lines.
-void Terrain::getPhysicsVertices()
+void Terrain::getPhysicsVertices(TileTerrain *tile)
 {
 	// first, accumulate *only* triangles
-	for (int i = 0; i < tilesX; i++)
-	{
-		for (int j = 0; j < tilesZ; j++)
-		{
-			TileTerrain *tile = tiles[i][j];
+	if (!tile)
+		return;
 
-			if (!tile || tile->physicsGeometry.empty())
+	for (Physics *geom : tile->physicsGeometry)
+	{
+		int type = geom->m_geomType;
+
+		// --- BOX: emit 12 tris (6 faces × 2) ---
+		if (type == PHYSICS_GEOM_TYPE_BOX)
+		{
+			VEC3 &h = geom->m_halfSize;
+			VEC3 v[8] = {
+				{-h.X, +h.Y, -h.Z}, {+h.X, +h.Y, -h.Z}, {+h.X, -h.Y, -h.Z}, {-h.X, -h.Y, -h.Z}, {-h.X, +h.Y, +h.Z}, {+h.X, +h.Y, +h.Z}, {+h.X, -h.Y, +h.Z}, {-h.X, -h.Y, +h.Z}};
+			for (auto &vv : v)
+				geom->m_absTransform.transformVect(vv);
+			// correct faces: front, back, left, right, top, bottom
+			int F[6][4] = {
+				{0, 1, 2, 3}, {5, 4, 7, 6}, {0, 3, 7, 4}, {1, 5, 6, 2}, {0, 4, 5, 1}, {3, 2, 6, 7}};
+			for (int f = 0; f < 6; ++f)
+			{
+				int a = F[f][0], b = F[f][1], c = F[f][2], d = F[f][3];
+				// tri1 (a,b,c), tri2 (a,c,d)
+				tile->physicsVertices.insert(tile->physicsVertices.end(), {v[a].X, v[a].Y, v[a].Z, v[b].X, v[b].Y, v[b].Z, v[c].X, v[c].Y, v[c].Z,
+																		   v[a].X, v[a].Y, v[a].Z, v[c].X, v[c].Y, v[c].Z, v[d].X, v[d].Y, v[d].Z});
+			}
+		}
+		// --- CYLINDER (unchanged) ---
+		else if (type == PHYSICS_GEOM_TYPE_CYLINDER)
+		{
+			const int CUT_NUM = 16;
+			const float pi = 3.14159265359f;
+			float angle_step = 2.0f * pi / CUT_NUM;
+			float radius = geom->m_halfSize.X;
+			float height = geom->m_halfSize.Y;
+
+			int myoffset = 0.5 * radius;
+
+			// Local center points
+			VEC3 centerBottom(myoffset, -height, -myoffset);
+			VEC3 centerTop(myoffset, height, -myoffset);
+			geom->m_absTransform.transformVect(centerBottom);
+			geom->m_absTransform.transformVect(centerTop);
+
+			for (int s = 0; s < CUT_NUM; s++)
+			{
+				float angle0 = s * angle_step;
+				float angle1 = (s + 1) * angle_step;
+
+				float x0 = radius * cosf(angle0) + myoffset, z0 = radius * sinf(angle0) - myoffset;
+				float x1 = radius * cosf(angle1) + myoffset, z1 = radius * sinf(angle1) - myoffset;
+
+				// Local space points
+				VEC3 b0(x0, -height, z0);
+				VEC3 b1(x1, -height, z1);
+				VEC3 t0(x0, +height, z0);
+				VEC3 t1(x1, +height, z1);
+
+				// Transform to world
+				geom->m_absTransform.transformVect(b0);
+				geom->m_absTransform.transformVect(b1);
+				geom->m_absTransform.transformVect(t0);
+				geom->m_absTransform.transformVect(t1);
+
+				// --- Bottom Cap (CCW when viewed from below)
+				tile->physicsVertices.insert(tile->physicsVertices.end(), {b1.X, b1.Y, b1.Z,
+																		   b0.X, b0.Y, b0.Z,
+																		   centerBottom.X, centerBottom.Y, centerBottom.Z});
+
+				// --- Top Cap (CCW when viewed from above)
+				tile->physicsVertices.insert(tile->physicsVertices.end(), {t0.X, t0.Y, t0.Z,
+																		   t1.X, t1.Y, t1.Z,
+																		   centerTop.X, centerTop.Y, centerTop.Z});
+
+				// --- Side Face (two triangles)
+				tile->physicsVertices.insert(tile->physicsVertices.end(), {b0.X, b0.Y, b0.Z,
+																		   t0.X, t0.Y, t0.Z,
+																		   t1.X, t1.Y, t1.Z});
+
+				tile->physicsVertices.insert(tile->physicsVertices.end(), {b0.X, b0.Y, b0.Z,
+																		   t1.X, t1.Y, t1.Z,
+																		   b1.X, b1.Y, b1.Z});
+			}
+		}
+
+		// --- MESH: emit each face as one triangle ---
+		else if (type == PHYSICS_GEOM_TYPE_MESH)
+		{
+			auto *m = geom->m_refMesh;
+			if (!m)
 				continue;
 
-			for (Physics *geom : tile->physicsGeometry)
+			const float RENDER_H_OFF = 0.10f;
+			int F = m->GetNbFace();
+			auto face = m->GetFacePointer();
+			auto vert = m->GetVertexPointer();
+
+			for (int f = 0; f < F; ++f)
 			{
-				int type = geom->m_geomType;
+				int a = face[4 * f];
+				int b = face[4 * f + 1];
+				int c = face[4 * f + 2];
 
-				// --- BOX: emit 12 tris (6 faces × 2) ---
-				if (type == PHYSICS_GEOM_TYPE_BOX)
-				{
-					VEC3 &h = geom->m_halfSize;
-					VEC3 v[8] = {
-						{-h.X, +h.Y, -h.Z}, {+h.X, +h.Y, -h.Z}, {+h.X, -h.Y, -h.Z}, {-h.X, -h.Y, -h.Z}, {-h.X, +h.Y, +h.Z}, {+h.X, +h.Y, +h.Z}, {+h.X, -h.Y, +h.Z}, {-h.X, -h.Y, +h.Z}};
-					for (auto &vv : v)
-						geom->m_absTransform.transformVect(vv);
-					// correct faces: front, back, left, right, top, bottom
-					int F[6][4] = {
-						{0, 1, 2, 3}, {5, 4, 7, 6}, {0, 3, 7, 4}, {1, 5, 6, 2}, {0, 4, 5, 1}, {3, 2, 6, 7}};
-					for (int f = 0; f < 6; ++f)
-					{
-						int a = F[f][0], b = F[f][1], c = F[f][2], d = F[f][3];
-						// tri1 (a,b,c), tri2 (a,c,d)
-						tile->physicsVertices.insert(tile->physicsVertices.end(), {v[a].X, v[a].Y, v[a].Z, v[b].X, v[b].Y, v[b].Z, v[c].X, v[c].Y, v[c].Z,
-																				   v[a].X, v[a].Y, v[a].Z, v[c].X, v[c].Y, v[c].Z, v[d].X, v[d].Y, v[d].Z});
-					}
-				}
-				// --- CYLINDER (unchanged) ---
-				else if (type == PHYSICS_GEOM_TYPE_CYLINDER)
-				{
-					const int CUT_NUM = 16;
-					const float pi = 3.14159265359f;
-					float angle_step = 2.0f * pi / CUT_NUM;
-					float radius = geom->m_halfSize.X;
-					float height = geom->m_halfSize.Y;
+				// Mirror Z BEFORE transformation
+				VEC3 v0(vert[3 * a], vert[3 * a + 1] + RENDER_H_OFF, -vert[3 * a + 2]);
+				VEC3 v1(vert[3 * b], vert[3 * b + 1] + RENDER_H_OFF, -vert[3 * b + 2]);
+				VEC3 v2(vert[3 * c], vert[3 * c + 1] + RENDER_H_OFF, -vert[3 * c + 2]);
 
-					int myoffset = 0.5 * radius;
+				geom->m_absTransform.transformVect(v0);
+				geom->m_absTransform.transformVect(v1);
+				geom->m_absTransform.transformVect(v2);
 
-					// Local center points
-					VEC3 centerBottom(myoffset, -height, -myoffset);
-					VEC3 centerTop(myoffset, height, -myoffset);
-					geom->m_absTransform.transformVect(centerBottom);
-					geom->m_absTransform.transformVect(centerTop);
-
-					for (int s = 0; s < CUT_NUM; s++)
-					{
-						float angle0 = s * angle_step;
-						float angle1 = (s + 1) * angle_step;
-
-						float x0 = radius * cosf(angle0) + myoffset, z0 = radius * sinf(angle0) - myoffset;
-						float x1 = radius * cosf(angle1) + myoffset, z1 = radius * sinf(angle1) - myoffset;
-
-						// Local space points
-						VEC3 b0(x0, -height, z0);
-						VEC3 b1(x1, -height, z1);
-						VEC3 t0(x0, +height, z0);
-						VEC3 t1(x1, +height, z1);
-
-						// Transform to world
-						geom->m_absTransform.transformVect(b0);
-						geom->m_absTransform.transformVect(b1);
-						geom->m_absTransform.transformVect(t0);
-						geom->m_absTransform.transformVect(t1);
-
-						// --- Bottom Cap (CCW when viewed from below)
-						tile->physicsVertices.insert(tile->physicsVertices.end(), {b1.X, b1.Y, b1.Z,
-																				   b0.X, b0.Y, b0.Z,
-																				   centerBottom.X, centerBottom.Y, centerBottom.Z});
-
-						// --- Top Cap (CCW when viewed from above)
-						tile->physicsVertices.insert(tile->physicsVertices.end(), {t0.X, t0.Y, t0.Z,
-																				   t1.X, t1.Y, t1.Z,
-																				   centerTop.X, centerTop.Y, centerTop.Z});
-
-						// --- Side Face (two triangles)
-						tile->physicsVertices.insert(tile->physicsVertices.end(), {b0.X, b0.Y, b0.Z,
-																				   t0.X, t0.Y, t0.Z,
-																				   t1.X, t1.Y, t1.Z});
-
-						tile->physicsVertices.insert(tile->physicsVertices.end(), {b0.X, b0.Y, b0.Z,
-																				   t1.X, t1.Y, t1.Z,
-																				   b1.X, b1.Y, b1.Z});
-					}
-				}
-
-				// --- MESH: emit each face as one triangle ---
-				else if (type == PHYSICS_GEOM_TYPE_MESH)
-				{
-					auto *m = geom->m_refMesh;
-					if (!m)
-						continue;
-
-					const float RENDER_H_OFF = 0.10f;
-					int F = m->GetNbFace();
-					auto face = m->GetFacePointer();
-					auto vert = m->GetVertexPointer();
-
-					for (int f = 0; f < F; ++f)
-					{
-						int a = face[4 * f];
-						int b = face[4 * f + 1];
-						int c = face[4 * f + 2];
-
-						// Mirror Z BEFORE transformation
-						VEC3 v0(vert[3 * a], vert[3 * a + 1] + RENDER_H_OFF, -vert[3 * a + 2]);
-						VEC3 v1(vert[3 * b], vert[3 * b + 1] + RENDER_H_OFF, -vert[3 * b + 2]);
-						VEC3 v2(vert[3 * c], vert[3 * c + 1] + RENDER_H_OFF, -vert[3 * c + 2]);
-
-						geom->m_absTransform.transformVect(v0);
-						geom->m_absTransform.transformVect(v1);
-						geom->m_absTransform.transformVect(v2);
-
-						// Fix winding: v0 → v2 → v1 instead of v0 → v1 → v2
-						tile->physicsVertices.insert(tile->physicsVertices.end(), {v0.X, v0.Y, v0.Z,
-																				   v2.X, v2.Y, v2.Z,
-																				   v1.X, v1.Y, v1.Z});
-					}
-				}
+				// Fix winding: v0 → v2 → v1 instead of v0 → v1 → v2
+				tile->physicsVertices.insert(tile->physicsVertices.end(), {v0.X, v0.Y, v0.Z,
+																		   v2.X, v2.Y, v2.Z,
+																		   v1.X, v1.Y, v1.Z});
 			}
-
-			// mark where the triangle section ends
-			tile->physicsVertexCount = tile->physicsVertices.size() / 3;
 		}
 	}
 
-	for (int i = 0; i < tilesX; i++)
-		for (int j = 0; j < tilesZ; j++)
+	// mark where the triangle section ends
+	tile->physicsVertexCount = tile->physicsVertices.size() / 3;
+
+	if (!tile || tile->physicsGeometry.empty())
+		return;
+
+	for (auto *geom : tile->physicsGeometry)
+	{
+		int type = geom->m_geomType;
+		// BOX edges
+		if (type == PHYSICS_GEOM_TYPE_BOX)
 		{
-			if (!tiles[i][j] || tiles[i][j]->physicsGeometry.empty())
+			VEC3 &h = geom->m_halfSize;
+			VEC3 v[8] = {/* same 8 vertices */};
+			for (auto &vv : v)
+				geom->m_absTransform.transformVect(vv);
+			int E[12][2] = {
+				{0, 1}, {1, 2}, {2, 3}, {3, 0}, {4, 5}, {5, 6}, {6, 7}, {7, 4}, {0, 4}, {1, 5}, {2, 6}, {3, 7}};
+			for (auto &e : E)
+			{
+				tile->physicsVertices.insert(tile->physicsVertices.end(), {v[e[0]].X, v[e[0]].Y, v[e[0]].Z,
+																		   v[e[1]].X, v[e[1]].Y, v[e[1]].Z});
+			}
+		}
+		// CYLINDER edges
+		else if (type == PHYSICS_GEOM_TYPE_CYLINDER)
+		{
+			const int CUT_NUM = 16;
+			const float pi = 3.14159265359f;
+			float angle_step = 2.0f * pi / CUT_NUM;
+			float radius = geom->m_halfSize.X;
+			float height = geom->m_halfSize.Y;
+
+			int myoffset = 0.5 * radius;
+
+			// Local center points
+			VEC3 centerBottom(myoffset, -height, -myoffset);
+			VEC3 centerTop(myoffset, height, -myoffset);
+			geom->m_absTransform.transformVect(centerBottom);
+			geom->m_absTransform.transformVect(centerTop);
+
+			for (int s = 0; s < CUT_NUM; s++)
+			{
+				float angle0 = s * angle_step;
+				float angle1 = (s + 1) * angle_step;
+
+				float x0 = radius * cosf(angle0) + myoffset, z0 = radius * sinf(angle0) - myoffset;
+				float x1 = radius * cosf(angle1) + myoffset, z1 = radius * sinf(angle1) - myoffset;
+
+				VEC3 b0(x0, -height, z0);
+				VEC3 t0(x0, height, z0);
+				VEC3 b1(x1, -height, z1);
+				VEC3 t1(x1, height, z1);
+
+				geom->m_absTransform.transformVect(b0);
+				geom->m_absTransform.transformVect(t0);
+				geom->m_absTransform.transformVect(b1);
+				geom->m_absTransform.transformVect(t1);
+
+				// --- Bottom Cap (CCW from below)
+				tile->physicsVertices.insert(tile->physicsVertices.end(), {b1.X, b1.Y, b1.Z,
+																		   b0.X, b0.Y, b0.Z,
+																		   centerBottom.X, centerBottom.Y, centerBottom.Z});
+
+				tile->physicsVertices.insert(tile->physicsVertices.end(), {b0.X, b0.Y, b0.Z,
+																		   t1.X, t1.Y, t1.Z,
+																		   b1.X, b1.Y, b1.Z});
+
+				// --- Side Face
+				tile->physicsVertices.insert(tile->physicsVertices.end(), {b0.X, b0.Y, b0.Z,
+																		   t0.X, t0.Y, t0.Z,
+																		   t1.X, t1.Y, t1.Z});
+
+				// --- Top Cap (CCW from above)
+				tile->physicsVertices.insert(tile->physicsVertices.end(), {t0.X, t0.Y, t0.Z,
+																		   t1.X, t1.Y, t1.Z,
+																		   centerTop.X, centerTop.Y, centerTop.Z});
+			}
+		}
+		// MESH edges
+		else if (type == PHYSICS_GEOM_TYPE_MESH)
+		{
+			auto *m = geom->m_refMesh;
+			if (!m)
 				continue;
 
-			TileTerrain *tile = tiles[i][j];
+			const float RENDER_H_OFF = 0.10f;
+			int F = m->GetNbFace();
+			auto face = m->GetFacePointer();
+			auto vert = m->GetVertexPointer();
 
-			for (auto *geom : tiles[i][j]->physicsGeometry)
+			for (int f = 0; f < F; ++f)
 			{
-				int type = geom->m_geomType;
-				// BOX edges
-				if (type == PHYSICS_GEOM_TYPE_BOX)
-				{
-					VEC3 &h = geom->m_halfSize;
-					VEC3 v[8] = {/* same 8 vertices */};
-					for (auto &vv : v)
-						geom->m_absTransform.transformVect(vv);
-					int E[12][2] = {
-						{0, 1}, {1, 2}, {2, 3}, {3, 0}, {4, 5}, {5, 6}, {6, 7}, {7, 4}, {0, 4}, {1, 5}, {2, 6}, {3, 7}};
-					for (auto &e : E)
-					{
-						tile->physicsVertices.insert(tile->physicsVertices.end(), {v[e[0]].X, v[e[0]].Y, v[e[0]].Z,
-																				   v[e[1]].X, v[e[1]].Y, v[e[1]].Z});
-					}
-				}
-				// CYLINDER edges
-				else if (type == PHYSICS_GEOM_TYPE_CYLINDER)
-				{
-					const int CUT_NUM = 16;
-					const float pi = 3.14159265359f;
-					float angle_step = 2.0f * pi / CUT_NUM;
-					float radius = geom->m_halfSize.X;
-					float height = geom->m_halfSize.Y;
+				int a = face[4 * f];
+				int b = face[4 * f + 1];
+				int c = face[4 * f + 2];
 
-					int myoffset = 0.5 * radius;
+				// Mirror Z by negating Z value
+				VEC3 v0(vert[3 * a], vert[3 * a + 1] + RENDER_H_OFF, -vert[3 * a + 2]);
+				VEC3 v1(vert[3 * b], vert[3 * b + 1] + RENDER_H_OFF, -vert[3 * b + 2]);
+				VEC3 v2(vert[3 * c], vert[3 * c + 1] + RENDER_H_OFF, -vert[3 * c + 2]);
 
-					// Local center points
-					VEC3 centerBottom(myoffset, -height, -myoffset);
-					VEC3 centerTop(myoffset, height, -myoffset);
-					geom->m_absTransform.transformVect(centerBottom);
-					geom->m_absTransform.transformVect(centerTop);
+				// Apply transform
+				geom->m_absTransform.transformVect(v0);
+				geom->m_absTransform.transformVect(v1);
+				geom->m_absTransform.transformVect(v2);
 
-					for (int s = 0; s < CUT_NUM; s++)
-					{
-						float angle0 = s * angle_step;
-						float angle1 = (s + 1) * angle_step;
-
-						float x0 = radius * cosf(angle0) + myoffset, z0 = radius * sinf(angle0) - myoffset;
-						float x1 = radius * cosf(angle1) + myoffset, z1 = radius * sinf(angle1) - myoffset;
-
-						VEC3 b0(x0, -height, z0);
-						VEC3 t0(x0, height, z0);
-						VEC3 b1(x1, -height, z1);
-						VEC3 t1(x1, height, z1);
-
-						geom->m_absTransform.transformVect(b0);
-						geom->m_absTransform.transformVect(t0);
-						geom->m_absTransform.transformVect(b1);
-						geom->m_absTransform.transformVect(t1);
-
-						// --- Bottom Cap (CCW from below)
-						tile->physicsVertices.insert(tile->physicsVertices.end(), {b1.X, b1.Y, b1.Z,
-																				   b0.X, b0.Y, b0.Z,
-																				   centerBottom.X, centerBottom.Y, centerBottom.Z});
-
-						tile->physicsVertices.insert(tile->physicsVertices.end(), {b0.X, b0.Y, b0.Z,
-																				   t1.X, t1.Y, t1.Z,
-																				   b1.X, b1.Y, b1.Z});
-
-						// --- Side Face
-						tile->physicsVertices.insert(tile->physicsVertices.end(), {b0.X, b0.Y, b0.Z,
-																				   t0.X, t0.Y, t0.Z,
-																				   t1.X, t1.Y, t1.Z});
-
-						// --- Top Cap (CCW from above)
-						tile->physicsVertices.insert(tile->physicsVertices.end(), {t0.X, t0.Y, t0.Z,
-																				   t1.X, t1.Y, t1.Z,
-																				   centerTop.X, centerTop.Y, centerTop.Z});
-					}
-				}
-				// MESH edges
-				else if (type == PHYSICS_GEOM_TYPE_MESH)
-				{
-					auto *m = geom->m_refMesh;
-					if (!m)
-						continue;
-
-					const float RENDER_H_OFF = 0.10f;
-					int F = m->GetNbFace();
-					auto face = m->GetFacePointer();
-					auto vert = m->GetVertexPointer();
-
-					for (int f = 0; f < F; ++f)
-					{
-						int a = face[4 * f];
-						int b = face[4 * f + 1];
-						int c = face[4 * f + 2];
-
-						// Mirror Z by negating Z value
-						VEC3 v0(vert[3 * a], vert[3 * a + 1] + RENDER_H_OFF, -vert[3 * a + 2]);
-						VEC3 v1(vert[3 * b], vert[3 * b + 1] + RENDER_H_OFF, -vert[3 * b + 2]);
-						VEC3 v2(vert[3 * c], vert[3 * c + 1] + RENDER_H_OFF, -vert[3 * c + 2]);
-
-						// Apply transform
-						geom->m_absTransform.transformVect(v0);
-						geom->m_absTransform.transformVect(v1);
-						geom->m_absTransform.transformVect(v2);
-
-						// Fix winding after mirroring: v0 → v2 → v1
-						tile->physicsVertices.insert(tile->physicsVertices.end(), {v0.X, v0.Y, v0.Z, v2.X, v2.Y, v2.Z,
-																				   v2.X, v2.Y, v2.Z, v1.X, v1.Y, v1.Z,
-																				   v1.X, v1.Y, v1.Z, v0.X, v0.Y, v0.Z});
-					}
-				}
+				// Fix winding after mirroring: v0 → v2 → v1
+				tile->physicsVertices.insert(tile->physicsVertices.end(), {v0.X, v0.Y, v0.Z, v2.X, v2.Y, v2.Z,
+																		   v2.X, v2.Y, v2.Z, v1.X, v1.Y, v1.Z,
+																		   v1.X, v1.Y, v1.Z, v0.X, v0.Y, v0.Z});
 			}
-
-			glGenVertexArrays(1, &tile->phyVAO);
-			glGenBuffers(1, &tile->phyVBO);
-			glBindVertexArray(tile->phyVAO);
-			glBindBuffer(GL_ARRAY_BUFFER, tile->phyVBO);
-			glBufferData(GL_ARRAY_BUFFER, tile->physicsVertices.size() * sizeof(float), tile->physicsVertices.data(), GL_STATIC_DRAW);
-			glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
-			glEnableVertexAttribArray(0);
 		}
+	}
+
+	glGenVertexArrays(1, &tile->phyVAO);
+	glGenBuffers(1, &tile->phyVBO);
+	glBindVertexArray(tile->phyVAO);
+	glBindBuffer(GL_ARRAY_BUFFER, tile->phyVBO);
+	glBufferData(GL_ARRAY_BUFFER, tile->physicsVertices.size() * sizeof(float), tile->physicsVertices.data(), GL_STATIC_DRAW);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
+	glEnableVertexAttribArray(0);
+	glBindVertexArray(0);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+}
+
+bool Terrain::loadTileAt(int gridX, int gridZ)
+{
+	std::cout << "Loading tile [" << gridX << "][" << gridZ << "]" << std::endl;
+
+	// convert global coords -> index
+	int ix = gridX - tileMinX;
+	int iz = gridZ - tileMinZ;
+	if (tiles[ix][iz] != nullptr)
+	{
+		tileState[ix][iz] = TileLoadState::Ready;
+		return true;
+	}
+
+	// find archive index for this tile
+	long long key = makeTileKey(gridX, gridZ);
+	auto it = trnIndexByCoord.find(key);
+	if (it == trnIndexByCoord.end())
+	{
+		// no tile exists for these coords
+		return false;
+	}
+	int fileIndex = it->second;
+
+	IReadResFile *trnFile = terrainArchive->openFile(fileIndex);
+	if (!trnFile)
+		return false;
+
+	int tileX = 0, tileZ = 0;
+	TileTerrain *tile = TileTerrain::load(trnFile, tileX, tileZ, *this);
+	trnFile->drop();
+
+	if (!tile)
+	{
+		tileState[ix][iz] = TileLoadState::Unloaded;
+		return false;
+	}
+
+	// load tile entities & physics
+	loadTileEntities(itemsArchive, physicsArchive, tileX, tileZ, tile, *this);
+
+	// optionally load nav tile for this tile
+	// loadTileNavigation(navigationArchive, tileX, tileZ);
+
+	// build per-tile vertex data and GL buffers
+	getTerrainVertices(tile);
+	getNavigationVertices(tile);
+	getPhysicsVertices(tile);
+	getWaterVertices(tile);
+
+	tiles[ix][iz] = tile;
+	tileState[ix][iz] = TileLoadState::Ready;
+	return true;
+}
+
+void Terrain::unloadTileAt(int ix, int iz)
+{
+	if (!tiles[ix][iz])
+	{
+		tileState[ix][iz] = TileLoadState::Unloaded;
+		return;
+	}
+	TileTerrain *tile = tiles[ix][iz];
+	// unbind if currently bound
+	GLint curVAO = 0;
+	glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &curVAO);
+	if ((GLuint)curVAO == tile->trnVAO)
+		glBindVertexArray(0);
+
+	// delete GL objects and models/physics
+	delete tile;
+	tiles[ix][iz] = nullptr;
+	tileState[ix][iz] = TileLoadState::Unloaded;
 }
 
 //! Clears GPU memory and resets viewer state.
@@ -899,147 +910,261 @@ void Terrain::reset()
 
 	for (auto &column : tiles)
 		for (TileTerrain *tile : column)
-			delete tile;
+			if (tile)
+				delete tile;
 
 	tiles.clear();
 	sounds.clear();
+
+	trnIndexByCoord.clear();
+	pendingTileLoads.clear();
+
+	if (terrainArchive)
+	{
+		delete terrainArchive;
+		terrainArchive = NULL;
+	}
+
+	if (itemsArchive)
+	{
+		delete itemsArchive;
+		itemsArchive = NULL;
+	}
+
+	if (navigationArchive)
+	{
+		delete navigationArchive;
+		navigationArchive = NULL;
+	}
+
+	if (physicsArchive)
+	{
+		delete physicsArchive;
+		physicsArchive = NULL;
+	}
 }
 
 // call: terrain.updateVisibleTiles(camera, projection);
 // cheap per-frame visible tile selection (square radius) + frustum culling
+// Replace your existing updateVisibleTiles with this distance-prioritized version.
 void Terrain::updateVisibleTiles(glm::mat4 view, glm::mat4 projection)
 {
-	visibleTiles.clear();
-
-	if (tilesX == 0 || tilesZ == 0)
+	if (!terrainLoaded || tilesX == 0 || tilesZ == 0)
 		return;
 
-	// 1) compute tile-square around camera (same as before)
-	const int camTileX = (int)std::floor(camera.Position.x / (float)ChunksInTile);
-	const int camTileZ = (int)std::floor(camera.Position.z / (float)ChunksInTile);
+	const glm::vec3 camPos = camera.Position;
+	const float tileSize = static_cast<float>(ChunksInTile); // same metric used elsewhere
 
-	int centerX = camTileX - tileMinX;
-	int centerZ = camTileZ - tileMinZ;
+	const int prefetchTiles = 2; // configurable
+	const int renderRadiusTiles = visibleRadiusTiles;
+	const int unloadRadiusTiles = renderRadiusTiles + prefetchTiles + 1;
 
-	centerX = std::clamp(centerX, 0, tilesX - 1);
-	centerZ = std::clamp(centerZ, 0, tilesZ - 1);
+	const float renderRadiusW = (float)renderRadiusTiles * tileSize;
+	const float unloadRadiusW = (float)unloadRadiusTiles * tileSize;
+	const float renderRadiusSq = renderRadiusW * renderRadiusW;
+	const float unloadRadiusSq = unloadRadiusW * unloadRadiusW;
 
-	int r = visibleRadiusTiles; // 2 -> 5x5
+	// center tile in global tile coords
+	const int camTileX = (int)std::floor(camPos.x / tileSize);
+	const int camTileZ = (int)std::floor(camPos.z / tileSize);
 
-	int x0 = std::max(0, centerX - r);
-	int x1 = std::min(tilesX - 1, centerX + r);
-	int z0 = std::max(0, centerZ - r);
-	int z1 = std::min(tilesZ - 1, centerZ + r);
+	// working rectangle in global coords (we use unloadRadius to decide both loads & unloads)
+	int wantGX0 = camTileX - unloadRadiusTiles;
+	int wantGX1 = camTileX + unloadRadiusTiles;
+	int wantGZ0 = camTileZ - unloadRadiusTiles;
+	int wantGZ1 = camTileZ + unloadRadiusTiles;
 
-	visibleTiles.reserve((x1 - x0 + 1) * (z1 - z0 + 1));
+	wantGX0 = std::max(wantGX0, tileMinX);
+	wantGZ0 = std::max(wantGZ0, tileMinZ);
+	wantGX1 = std::min(wantGX1, tileMaxX);
+	wantGZ1 = std::min(wantGZ1, tileMaxZ);
 
-	// 2) build frustum planes from projection * view (column-major glm)
-	// We'll extract planes in form ax + by + cz + d = 0 (not normalized yet).
-	glm::mat4 clip = projection * view; // projection * view
-
-	// Access columns of clip: clip[col][row]
-	// Plane extraction using rows from clip matrix:
-	// left:   row3 + row0
-	// right:  row3 - row0
-	// bottom: row3 + row1
-	// top:    row3 - row1
-	// near:   row3 + row2
-	// far:    row3 - row2
-	struct Plane
+	// Candidate structure
+	struct Cand
 	{
-		glm::vec3 n;
-		float d;
+		int gx, gz;	  // global tile coords
+		int ix, iz;	  // index into arrays
+		float distSq; // squared distance from camera to tile center
 	};
-	std::array<Plane, 6> planes;
+	std::vector<Cand> candidates;
+	candidates.reserve(trnIndexByCoord.size() / 8 + 16);
 
-	auto extractPlane = [&](int rowA, int rowB, bool subtract) -> Plane
+	// Helper: extract tile coords from key produced by makeTileKey
+	auto extractFromKey = [](long long key) -> std::pair<int, int>
 	{
-		// row i values: for j in 0..3 -> clip[j][i]
-		// compute coefficients = row3 (+/-) rowX
-		float a, b, c, dd;
-		if (!subtract)
+		int gx = (int)(key >> 32);
+		int gz = (int)(key & 0xffffffffULL);
+		return {gx, gz};
+	};
+
+	// --- Collect candidates ONLY from tiles that actually exist (trnIndexByCoord) ---
+	for (auto &kv : trnIndexByCoord)
+	{
+		long long key = kv.first;
+		auto [gx, gz] = extractFromKey(key);
+
+		// skip if outside our bounding rect
+		if (gx < wantGX0 || gx > wantGX1 || gz < wantGZ0 || gz > wantGZ1)
+			continue;
+
+		int ix = gx - tileMinX;
+		int iz = gz - tileMinZ;
+
+		if (ix < 0 || iz < 0 || ix >= tilesX || iz >= tilesZ)
+			continue; // defensive
+
+		// Only consider tiles that are currently Unloaded (we won't re-schedule Loading/Ready)
+		if (tileState[ix][iz] != TileLoadState::Unloaded || tiles[ix][iz] != nullptr)
+			continue;
+
+		// compute tile center and squared distance to camera
+		float centerX = (gx + 0.5f) * tileSize;
+		float centerZ = (gz + 0.5f) * tileSize;
+		float dx = camPos.x - centerX;
+		float dz = camPos.z - centerZ;
+		float dsq = dx * dx + dz * dz;
+
+		// candidate within unload radius (we only scanned within unload radius, but check anyway)
+		if (dsq <= (unloadRadiusSq + 1e-6f))
+			candidates.push_back({gx, gz, ix, iz, dsq});
+	}
+
+	// sort closest-first
+	std::sort(candidates.begin(), candidates.end(), [](const Cand &a, const Cand &b)
+			  { return a.distSq < b.distSq; });
+
+	// --- Load budget: process nearest candidates first ---
+	const int budget = std::max(1, maxTilesToLoadPerFrame);
+	int loadsThisFrame = 0;
+	for (const Cand &c : candidates)
+	{
+		if (loadsThisFrame >= budget)
+			break;
+
+		// double-check bounds/state just before reserving
+		if (c.ix < 0 || c.iz < 0 || c.ix >= tilesX || c.iz >= tilesZ)
+			continue;
+		if (tileState[c.ix][c.iz] != TileLoadState::Unloaded || tiles[c.ix][c.iz] != nullptr)
+			continue;
+
+		// Reserve the slot to prevent duplicate scheduling next frame
+		tileState[c.ix][c.iz] = TileLoadState::Loading;
+
+		// synchronous load (must run on GL thread in your engine)
+		bool ok = loadTileAt(c.gx, c.gz);
+
+		if (ok)
 		{
-			a = clip[0][3] + clip[0][rowB];
-			b = clip[1][3] + clip[1][rowB];
-			c = clip[2][3] + clip[2][rowB];
-			dd = clip[3][3] + clip[3][rowB];
+			tileState[c.ix][c.iz] = TileLoadState::Ready;
+			++loadsThisFrame;
+			// optional debug:
+			// std::cout << "Loaded tile ["<<c.gx<<"]["<<c.gz<<"] distSq="<<c.distSq<<"\n";
 		}
 		else
 		{
-			a = clip[0][3] - clip[0][rowB];
-			b = clip[1][3] - clip[1][rowB];
-			c = clip[2][3] - clip[2][rowB];
-			dd = clip[3][3] - clip[3][rowB];
-		}
-		Plane p;
-		p.n = glm::vec3(a, b, c);
-		// normalize plane
-		float len = glm::length(p.n);
-		if (len > 0.0f)
-		{
-			p.n /= len;
-			p.d = dd / len;
-		}
-		else
-		{
-			p.d = dd;
-		}
-		return p;
-	};
-
-	// left  = row3 + row0
-	planes[0] = extractPlane(3, 0, false);
-	// right = row3 - row0
-	planes[1] = extractPlane(3, 0, true);
-	// bottom = row3 + row1
-	planes[2] = extractPlane(3, 1, false);
-	// top = row3 - row1
-	planes[3] = extractPlane(3, 1, true);
-	// near = row3 + row2
-	planes[4] = extractPlane(3, 2, false);
-	// far = row3 - row2
-	planes[5] = extractPlane(3, 2, true);
-
-	// 3) helper: test AABB against frustum (fast, separating-axis style)
-	auto aabbOutsidePlane = [](const Plane &p, const glm::vec3 &aabbMin, const glm::vec3 &aabbMax) -> bool
-	{
-		// find the "positive vertex" (the corner most in direction of plane normal)
-		glm::vec3 pos;
-		pos.x = (p.n.x >= 0.0f) ? aabbMax.x : aabbMin.x;
-		pos.y = (p.n.y >= 0.0f) ? aabbMax.y : aabbMin.y;
-		pos.z = (p.n.z >= 0.0f) ? aabbMax.z : aabbMin.z;
-		// plane eq: n dot x + d (note: here d is clipRow/len)
-		float dist = glm::dot(p.n, pos) + p.d;
-		return (dist < 0.0f); // if positive vertex is outside (negative), whole box is outside
-	};
-
-	// 4) gather tiles: first square, then frustum test per tile AABB
-	for (int x = x0; x <= x1; ++x)
-	{
-		for (int z = z0; z <= z1; ++z)
-		{
-			TileTerrain *t = tiles[x][z];
-			if (!t)
-				continue;
-
-			// obtain AABB min/max from tile->BBox
-			// adapt these names if your AABB stores them differently
-			glm::vec3 amin = glm::vec3(t->BBox.MinEdge.X, t->BBox.MinEdge.Y, t->BBox.MinEdge.Z); // <-- if your AABB uses different names, adjust
-			glm::vec3 amax = glm::vec3(t->BBox.MaxEdge.X, t->BBox.MaxEdge.Y, t->BBox.MaxEdge.Z);
-
-			bool culled = false;
-			for (const Plane &pl : planes)
-			{
-				if (aabbOutsidePlane(pl, amin, amax))
-				{
-					culled = true;
-					break;
-				}
-			}
-			if (!culled)
-				visibleTiles.push_back(t);
+			// revert so we can retry later
+			tileState[c.ix][c.iz] = TileLoadState::Unloaded;
+			// optional debug:
+			// std::cout << "Failed loading tile ["<<c.gx<<"]["<<c.gz<<"]\n";
 		}
 	}
+
+	// --- Unload pass: mark & delete tiles outside unload radius ---
+	// We iterate grid because some loaded tiles may not be present in trnIndexByCoord iteration order.
+	int unloadsThisFrame = 0;
+	for (int ix = 0; ix < tilesX && unloadsThisFrame < budget; ++ix)
+	{
+		for (int iz = 0; iz < tilesZ && unloadsThisFrame < budget; ++iz)
+		{
+			TileTerrain *t = tiles[ix][iz];
+			if (!t)
+			{
+				// ensure state consistent
+				if (tileState[ix][iz] != TileLoadState::Unloaded)
+					tileState[ix][iz] = TileLoadState::Unloaded;
+				continue;
+			}
+
+			// If not Ready, skip (don't unload Loading or Unloading again)
+			if (tileState[ix][iz] != TileLoadState::Ready)
+				continue;
+
+			int gx = ix + tileMinX;
+			int gz = iz + tileMinZ;
+			float centerX = (gx + 0.5f) * tileSize;
+			float centerZ = (gz + 0.5f) * tileSize;
+			float dx = camPos.x - centerX;
+			float dz = camPos.z - centerZ;
+			float dsq = dx * dx + dz * dz;
+
+			// If beyond unload radius — remove (with hysteresis)
+			if (dsq > unloadRadiusSq)
+			{
+				// mark unloading and delete (unloadTileAt will set state to Unloaded)
+				tileState[ix][iz] = TileLoadState::Unloading;
+				unloadTileAt(ix, iz);
+				tileState[ix][iz] = TileLoadState::Unloaded;
+				++unloadsThisFrame;
+				// optional debug:
+				// std::cout << "Unloaded tile ["<<gx<<"]["<<gz<<"]\n";
+			}
+		}
+	}
+
+	// --- Build visible list from Ready tiles within renderRadius (no frustum for now) ---
+	std::vector<TileTerrain *> newVisible;
+	newVisible.reserve((renderRadiusTiles * 2 + 1) * (renderRadiusTiles * 2 + 1));
+	// compute a tight index rectangle for render radius to iterate only necessary tiles
+	int wantVisGX0 = camTileX - renderRadiusTiles;
+	int wantVisGX1 = camTileX + renderRadiusTiles;
+	int wantVisGZ0 = camTileZ - renderRadiusTiles;
+	int wantVisGZ1 = camTileZ + renderRadiusTiles;
+
+	wantVisGX0 = std::max(wantVisGX0, tileMinX);
+	wantVisGZ0 = std::max(wantVisGZ0, tileMinZ);
+	wantVisGX1 = std::min(wantVisGX1, tileMaxX);
+	wantVisGZ1 = std::min(wantVisGZ1, tileMaxZ);
+
+	int vix0 = wantVisGX0 - tileMinX;
+	int viz0 = wantVisGZ0 - tileMinZ;
+	int vix1 = wantVisGX1 - tileMinX;
+	int viz1 = wantVisGZ1 - tileMinZ;
+
+	vix0 = std::clamp(vix0, 0, std::max(0, tilesX - 1));
+	viz0 = std::clamp(viz0, 0, std::max(0, tilesZ - 1));
+	vix1 = std::clamp(vix1, 0, std::max(0, tilesX - 1));
+	viz1 = std::clamp(viz1, 0, std::max(0, tilesZ - 1));
+
+	for (int ix = vix0; ix <= vix1; ++ix)
+	{
+		for (int iz = viz0; iz <= viz1; ++iz)
+		{
+			if (tileState[ix][iz] != TileLoadState::Ready)
+				continue;
+			TileTerrain *t = tiles[ix][iz];
+			if (!t)
+			{
+				tileState[ix][iz] = TileLoadState::Unloaded;
+				continue;
+			}
+
+			int gx = ix + tileMinX;
+			int gz = iz + tileMinZ;
+			float centerX = (gx + 0.5f) * tileSize;
+			float centerZ = (gz + 0.5f) * tileSize;
+			float dx = camPos.x - centerX;
+			float dz = camPos.z - centerZ;
+			float dsq = dx * dx + dz * dz;
+
+			if (dsq <= renderRadiusSq)
+				newVisible.push_back(t);
+		}
+	}
+
+	visibleTiles.swap(newVisible);
+
+	// Optionally emit a single line debug every frame (uncomment for dev)
+	// std::cout << "updateVisibleTiles: candidates=" << candidates.size() << " loads=" << loadsThisFrame << " unloads=" << unloadsThisFrame << " visible=" << visibleTiles.size() << std::endl;
 }
 
 //! Renders terrain and physics geometry meshes.
@@ -1048,6 +1173,10 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool rende
 	if (!terrainLoaded)
 		return;
 
+	// Update visible tiles (schedules loads/unloads and prepares visibleTiles)
+	updateVisibleTiles(view, projection);
+
+	// Prepare shader + common uniforms
 	shader.use();
 	shader.setMat4("model", glm::mat4(1.0f));
 	shader.setMat4("view", view);
@@ -1056,9 +1185,7 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool rende
 	shader.setVec3("lightPos", glm::vec3(camera.Position.x, camera.Position.y + 600.0f, camera.Position.z));
 	shader.setVec3("cameraPos", camera.Position);
 
-	updateVisibleTiles(view, projection);
-
-	// render terrain
+	// --- Pass 1: terrain (filled) ---
 	if (!simple)
 		shader.setInt("renderMode", 1);
 	else
@@ -1066,11 +1193,14 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool rende
 
 	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
-	for (int i = 0, n = visibleTiles.size(); i < n; i++)
+	for (size_t i = 0; i < visibleTiles.size(); ++i)
 	{
 		TileTerrain *tile = visibleTiles[i];
+		if (!tile)
+			continue;
 
-		if (!tile || tile->terrainVertices.empty())
+		// defensive checks: VAO exists and vertex count > 0
+		if (tile->trnVAO == 0 || tile->terrainVertexCount == 0)
 			continue;
 
 		glBindVertexArray(tile->trnVAO);
@@ -1078,63 +1208,67 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool rende
 		glBindVertexArray(0);
 	}
 
-	// render walkable surfaces
-	if (renderNavMesh)
-	{
-		shader.setInt("renderMode", 5);
+	// --- Pass 2: physics filled (if any) ---
+	// We'll draw filled physics geometry first (renderMode = 4)
+	shader.setInt("renderMode", 4);
+	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
-		for (int i = 0, n = visibleTiles.size(); i < n; i++)
-		{
-			TileTerrain *tile = visibleTiles[i];
-
-			if (!tile || tile->navigationVertices.empty())
-				continue;
-
-			glBindVertexArray(tile->navVAO);
-
-			glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-			glDrawArrays(GL_TRIANGLES, 0, tile->navmeshVertexCount);
-
-			glBindVertexArray(0);
-		}
-	}
-
-	// render physics
-	for (int i = 0, n = visibleTiles.size(); i < n; i++)
+	for (size_t i = 0; i < visibleTiles.size(); ++i)
 	{
 		TileTerrain *tile = visibleTiles[i];
-
-		if (!tile || tile->physicsVertices.empty())
-			continue;
-
-		glBindVertexArray(tile->phyVAO);
-
-		shader.setInt("renderMode", 4);
-		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-		glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
-
-		shader.setInt("renderMode", 2);
-		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-		glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
-
-		glBindVertexArray(0);
-	}
-
-	// render water and 3D models
-	for (int i = 0, n = visibleTiles.size(); i < n; i++)
-	{
-		TileTerrain *tile = visibleTiles[i];
-
 		if (!tile)
 			continue;
 
-		tile->water.draw(view, projection, light.showLighting, simple, dt, camera.Position);
+		if (tile->phyVAO == 0 || tile->physicsVertexCount == 0)
+			continue;
 
-		for (int k = 0, n = tile->models.size(); k < n; k++)
-			tile->models[k]->draw(view, projection, camera.Position, light.showLighting, simple);
+		glBindVertexArray(tile->phyVAO);
+		glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
+		glBindVertexArray(0);
 	}
 
-	// render skybox
+	// --- Pass 3: physics wireframe overlay (if any) ---
+	// Use a different render mode and wireframe polygon mode
+	shader.setInt("renderMode", 2);
+	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+
+	for (size_t i = 0; i < visibleTiles.size(); ++i)
+	{
+		TileTerrain *tile = visibleTiles[i];
+		if (!tile)
+			continue;
+
+		if (tile->phyVAO == 0 || tile->physicsVertexCount == 0)
+			continue;
+
+		glBindVertexArray(tile->phyVAO);
+		glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
+		glBindVertexArray(0);
+	}
+
+	// restore polygon mode to fill for subsequent passes
+	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+
+	// --- Pass 4: water and 3D models ---
+	// Water and models likely use their own VAOs / shaders internally; call their draw methods.
+	for (size_t i = 0; i < visibleTiles.size(); ++i)
+	{
+		TileTerrain *tile = visibleTiles[i];
+		if (!tile)
+			continue;
+
+		// water.draw is expected to handle its own GL state and shader inputs (it was used earlier)
+		tile->water.draw(view, projection, light.showLighting, simple, dt, camera.Position);
+
+		// draw models (if any)
+		for (size_t m = 0; m < tile->models.size(); ++m)
+		{
+			if (tile->models[m])
+				tile->models[m]->draw(view, projection, camera.Position, light.showLighting, simple);
+		}
+	}
+
+	// --- Pass 5: skybox (last, special depth func) ---
 	if (!simple)
 	{
 		glDepthFunc(GL_LEQUAL);
@@ -1142,5 +1276,9 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool rende
 		glDepthFunc(GL_LESS);
 	}
 
+	// Clean up: ensure no VAO left bound
 	glBindVertexArray(0);
+
+	// Restore polygon mode & other GL states if your engine relies on defaults elsewhere
+	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 }
