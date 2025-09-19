@@ -6,6 +6,7 @@
 #include "AABB.h"
 #include "Quaternion.h"
 #include "terrain.h"
+#include "water.h"
 #include "CZipResReader.h"
 #include "parserBDAE.h"
 #include "parserPHY.h"
@@ -64,19 +65,30 @@ enum
 class TileTerrain
 {
   public:
+	unsigned int trnVAO, trnVBO, navVAO, navVBO, phyVAO, phyVBO;
+	unsigned int terrainVertexCount, navmeshVertexCount, physicsVertexCount;
+	std::vector<float> terrainVertices, navigationVertices, physicsVertices; // vertex data
+	std::vector<Physics *> physicsGeometry;									 // .phy models
+	std::vector<Model *> models;											 // .bdae models
+	Water water;															 // water surface
+
 	float startX, startZ;							 // position on the grid in world space coordinates
 	float Y[UnitsInTileRow + 1][UnitsInTileCol + 1]; // height map (unscaled)
 	AABB BBox;										 // bounding box
-	std::vector<Physics *> physicsGeometry;			 // .phy models
-	std::vector<Model *> models;					 // .bdae models
 
 	ChunkInfo chunks[ChunksInTile];
+
 	glm::u8vec4 colors[UnitsInTileRow + 1][UnitsInTileCol + 1]; // vertex colors
 	glm::vec3 normals[UnitsInTileRow + 1][UnitsInTileCol + 1];	// normal vectors
 
 	TileTerrain()
-		: startX(0),
-		  startZ(0)
+		: startX(0), startZ(0),
+		  trnVAO(0), trnVBO(0),
+		  navVAO(0), navVBO(0),
+		  phyVAO(0), phyVBO(0),
+		  terrainVertexCount(0),
+		  navmeshVertexCount(0),
+		  physicsVertexCount(0)
 	{
 		memset(&chunks, 0, sizeof(chunks));
 		memset(&Y, 0, sizeof(Y));
@@ -84,6 +96,21 @@ class TileTerrain
 
 	~TileTerrain()
 	{
+		glDeleteVertexArrays(1, &trnVAO);
+		glDeleteVertexArrays(1, &navVAO);
+		glDeleteVertexArrays(1, &phyVAO);
+		glDeleteBuffers(1, &trnVBO);
+		glDeleteBuffers(1, &navVBO);
+		glDeleteBuffers(1, &phyVBO);
+
+		trnVAO = trnVBO = navVAO = navVBO = phyVAO = phyVBO = 0;
+
+		terrainVertexCount = navmeshVertexCount = physicsVertexCount = 0;
+
+		terrainVertices.clear();
+		navigationVertices.clear();
+		physicsVertices.clear();
+
 		for (Physics *p : physicsGeometry)
 			delete p;
 
@@ -93,6 +120,8 @@ class TileTerrain
 			delete m;
 
 		models.clear();
+
+		water.release();
 	}
 
 	//! Processes a single .trn file and returns a newly created TileTerrain object with the tile's mesh data saved.

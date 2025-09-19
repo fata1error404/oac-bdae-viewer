@@ -320,10 +320,7 @@ int main()
 			ourLight.draw(view, projection); // render light cube
 		}
 		else if (terrainModel.terrainLoaded)
-		{
-			terrainModel.draw(view, projection, displayBaseMesh, displayNavMesh);						  // render terrain
-			terrainModel.water.draw(view, projection, ourLight.showLighting, displayBaseMesh, deltaTime); // render water
-		}
+			terrainModel.draw(view, projection, displayBaseMesh, displayNavMesh, deltaTime); // render terrain
 
 		// render settings panel (and file browsing dialog, if open)
 		ImGui::Render();

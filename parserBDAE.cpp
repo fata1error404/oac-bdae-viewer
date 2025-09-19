@@ -709,4 +709,6 @@ void Model::draw(glm::mat4 view, glm::mat4 projection, glm::vec3 cameraPos, bool
 			glDrawElements(GL_TRIANGLES, indices[i].size(), GL_UNSIGNED_SHORT, 0);
 		}
 	}
+
+	glBindVertexArray(0);
 }
