@@ -824,59 +824,10 @@ void Terrain::getPhysicsVertices(TileTerrain *tile)
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
-bool Terrain::loadTileAt(int gridX, int gridZ)
-{
-	std::cout << "Loading tile [" << gridX << "][" << gridZ << "]" << std::endl;
+#include <future>
 
-	// convert global coords -> index
-	int ix = gridX - tileMinX;
-	int iz = gridZ - tileMinZ;
-	if (tiles[ix][iz] != nullptr)
-	{
-		tileState[ix][iz] = TileLoadState::Ready;
-		return true;
-	}
-
-	// find archive index for this tile
-	long long key = makeTileKey(gridX, gridZ);
-	auto it = trnIndexByCoord.find(key);
-	if (it == trnIndexByCoord.end())
-	{
-		// no tile exists for these coords
-		return false;
-	}
-	int fileIndex = it->second;
-
-	IReadResFile *trnFile = terrainArchive->openFile(fileIndex);
-	if (!trnFile)
-		return false;
-
-	int tileX = 0, tileZ = 0;
-	TileTerrain *tile = TileTerrain::load(trnFile, tileX, tileZ, *this);
-	trnFile->drop();
-
-	if (!tile)
-	{
-		tileState[ix][iz] = TileLoadState::Unloaded;
-		return false;
-	}
-
-	// load tile entities & physics
-	loadTileEntities(itemsArchive, physicsArchive, tileX, tileZ, tile, *this);
-
-	// optionally load nav tile for this tile
-	// loadTileNavigation(navigationArchive, tileX, tileZ);
-
-	// build per-tile vertex data and GL buffers
-	getTerrainVertices(tile);
-	getNavigationVertices(tile);
-	getPhysicsVertices(tile);
-	getWaterVertices(tile);
-
-	tiles[ix][iz] = tile;
-	tileState[ix][iz] = TileLoadState::Ready;
-	return true;
-}
+// Change loadTileAt to an async-friendly version
+// Async tile loader
 
 void Terrain::unloadTileAt(int ix, int iz)
 {
@@ -944,6 +895,43 @@ void Terrain::reset()
 	}
 }
 
+std::future<TileTerrain *> Terrain::loadTileAsync(int gx, int gz)
+{
+	return std::async(std::launch::async, [this, gx, gz]() -> TileTerrain *
+					  {
+						  int ix = gx - tileMinX;
+						  int iz = gz - tileMinZ;
+
+						  if (tiles[ix][iz] != nullptr)
+							  return tiles[ix][iz];
+
+						  long long key = makeTileKey(gx, gz);
+						  auto it = trnIndexByCoord.find(key);
+						  if (it == trnIndexByCoord.end())
+							  return nullptr;
+
+						  int fileIndex = it->second;
+						  IReadResFile *trnFile = terrainArchive->openFile(fileIndex);
+						  if (!trnFile)
+							  return nullptr;
+
+						  int tileX = 0, tileZ = 0;
+						  TileTerrain *tile = TileTerrain::load(trnFile, tileX, tileZ, *this);
+						  trnFile->drop();
+						  if (!tile)
+							  return nullptr;
+
+						  // CPU-heavy setup
+						  loadTileEntities(itemsArchive, physicsArchive, tileX, tileZ, tile, *this);
+						  getTerrainVertices(tile);
+						  getNavigationVertices(tile);
+						  getPhysicsVertices(tile);
+						  getWaterVertices(tile);
+
+						  return tile; // main thread will mark Ready and assign to tiles[ix][iz]
+					  });
+}
+
 // call: terrain.updateVisibleTiles(camera, projection);
 // cheap per-frame visible tile selection (square radius) + frustum culling
 // Replace your existing updateVisibleTiles with this distance-prioritized version.
@@ -953,9 +941,9 @@ void Terrain::updateVisibleTiles(glm::mat4 view, glm::mat4 projection)
 		return;
 
 	const glm::vec3 camPos = camera.Position;
-	const float tileSize = static_cast<float>(ChunksInTile); // same metric used elsewhere
+	const float tileSize = static_cast<float>(ChunksInTile);
 
-	const int prefetchTiles = 2; // configurable
+	const int prefetchTiles = 2;
 	const int renderRadiusTiles = visibleRadiusTiles;
 	const int unloadRadiusTiles = renderRadiusTiles + prefetchTiles + 1;
 
@@ -964,32 +952,23 @@ void Terrain::updateVisibleTiles(glm::mat4 view, glm::mat4 projection)
 	const float renderRadiusSq = renderRadiusW * renderRadiusW;
 	const float unloadRadiusSq = unloadRadiusW * unloadRadiusW;
 
-	// center tile in global tile coords
 	const int camTileX = (int)std::floor(camPos.x / tileSize);
 	const int camTileZ = (int)std::floor(camPos.z / tileSize);
 
-	// working rectangle in global coords (we use unloadRadius to decide both loads & unloads)
-	int wantGX0 = camTileX - unloadRadiusTiles;
-	int wantGX1 = camTileX + unloadRadiusTiles;
-	int wantGZ0 = camTileZ - unloadRadiusTiles;
-	int wantGZ1 = camTileZ + unloadRadiusTiles;
+	int wantGX0 = std::max(camTileX - unloadRadiusTiles, tileMinX);
+	int wantGZ0 = std::max(camTileZ - unloadRadiusTiles, tileMinZ);
+	int wantGX1 = std::min(camTileX + unloadRadiusTiles, tileMaxX);
+	int wantGZ1 = std::min(camTileZ + unloadRadiusTiles, tileMaxZ);
 
-	wantGX0 = std::max(wantGX0, tileMinX);
-	wantGZ0 = std::max(wantGZ0, tileMinZ);
-	wantGX1 = std::min(wantGX1, tileMaxX);
-	wantGZ1 = std::min(wantGZ1, tileMaxZ);
-
-	// Candidate structure
 	struct Cand
 	{
-		int gx, gz;	  // global tile coords
-		int ix, iz;	  // index into arrays
-		float distSq; // squared distance from camera to tile center
+		int gx, gz;
+		int ix, iz;
+		float distSq;
 	};
 	std::vector<Cand> candidates;
 	candidates.reserve(trnIndexByCoord.size() / 8 + 16);
 
-	// Helper: extract tile coords from key produced by makeTileKey
 	auto extractFromKey = [](long long key) -> std::pair<int, int>
 	{
 		int gx = (int)(key >> 32);
@@ -997,80 +976,99 @@ void Terrain::updateVisibleTiles(glm::mat4 view, glm::mat4 projection)
 		return {gx, gz};
 	};
 
-	// --- Collect candidates ONLY from tiles that actually exist (trnIndexByCoord) ---
+	// --- Collect candidates ---
 	for (auto &kv : trnIndexByCoord)
 	{
-		long long key = kv.first;
-		auto [gx, gz] = extractFromKey(key);
-
-		// skip if outside our bounding rect
+		auto [gx, gz] = extractFromKey(kv.first);
 		if (gx < wantGX0 || gx > wantGX1 || gz < wantGZ0 || gz > wantGZ1)
 			continue;
 
 		int ix = gx - tileMinX;
 		int iz = gz - tileMinZ;
-
 		if (ix < 0 || iz < 0 || ix >= tilesX || iz >= tilesZ)
-			continue; // defensive
-
-		// Only consider tiles that are currently Unloaded (we won't re-schedule Loading/Ready)
+			continue;
 		if (tileState[ix][iz] != TileLoadState::Unloaded || tiles[ix][iz] != nullptr)
 			continue;
 
-		// compute tile center and squared distance to camera
 		float centerX = (gx + 0.5f) * tileSize;
 		float centerZ = (gz + 0.5f) * tileSize;
 		float dx = camPos.x - centerX;
 		float dz = camPos.z - centerZ;
 		float dsq = dx * dx + dz * dz;
 
-		// candidate within unload radius (we only scanned within unload radius, but check anyway)
-		if (dsq <= (unloadRadiusSq + 1e-6f))
+		if (dsq <= unloadRadiusSq)
 			candidates.push_back({gx, gz, ix, iz, dsq});
 	}
 
-	// sort closest-first
-	std::sort(candidates.begin(), candidates.end(), [](const Cand &a, const Cand &b)
+	std::sort(candidates.begin(), candidates.end(),
+			  [](const Cand &a, const Cand &b)
 			  { return a.distSq < b.distSq; });
 
-	// --- Load budget: process nearest candidates first ---
 	const int budget = std::max(1, maxTilesToLoadPerFrame);
 	int loadsThisFrame = 0;
+
+	// --- Schedule async loads ---
+	// Schedule new async loads
+	// --- Schedule async loads ---
 	for (const Cand &c : candidates)
 	{
 		if (loadsThisFrame >= budget)
 			break;
-
-		// double-check bounds/state just before reserving
-		if (c.ix < 0 || c.iz < 0 || c.ix >= tilesX || c.iz >= tilesZ)
-			continue;
-		if (tileState[c.ix][c.iz] != TileLoadState::Unloaded || tiles[c.ix][c.iz] != nullptr)
+		if (tileState[c.ix][c.iz] != TileLoadState::Unloaded)
 			continue;
 
-		// Reserve the slot to prevent duplicate scheduling next frame
+		// Skip if already pending
+		bool alreadyPending = false;
+		for (auto &p : pendingTileLoads)
+			if (p.ix == c.ix && p.iz == c.iz)
+			{
+				alreadyPending = true;
+				break;
+			}
+		if (alreadyPending)
+			continue;
+
 		tileState[c.ix][c.iz] = TileLoadState::Loading;
 
-		// synchronous load (must run on GL thread in your engine)
-		bool ok = loadTileAt(c.gx, c.gz);
+		pendingTileLoads.emplace_back(
+			loadTileAsync(c.gx, c.gz),
+			c.ix, c.iz, c.gx, c.gz);
+		++loadsThisFrame;
+	}
 
-		if (ok)
+	// Collect completed async loads
+	// Collect completed async loads and upload GPU
+	for (auto it = pendingTileLoads.begin(); it != pendingTileLoads.end();)
+	{
+		auto &p = *it;
+		if (p.fut.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
 		{
-			tileState[c.ix][c.iz] = TileLoadState::Ready;
-			++loadsThisFrame;
-			// optional debug:
-			// std::cout << "Loaded tile ["<<c.gx<<"]["<<c.gz<<"] distSq="<<c.distSq<<"\n";
+			TileTerrain *tile = p.fut.get();
+			if (tile)
+			{
+				// Upload GPU resources on main thread
+				getTerrainVertices(tile);
+				getNavigationVertices(tile);
+				getPhysicsVertices(tile);
+				getWaterVertices(tile);
+
+				tiles[p.ix][p.iz] = tile;
+				tileState[p.ix][p.iz] = TileLoadState::Ready;
+			}
+			else
+			{
+				tileState[p.ix][p.iz] = TileLoadState::Unloaded; // retry next frame
+			}
+
+			it = pendingTileLoads.erase(it);
 		}
 		else
 		{
-			// revert so we can retry later
-			tileState[c.ix][c.iz] = TileLoadState::Unloaded;
-			// optional debug:
-			// std::cout << "Failed loading tile ["<<c.gx<<"]["<<c.gz<<"]\n";
+			++it;
 		}
 	}
 
-	// --- Unload pass: mark & delete tiles outside unload radius ---
-	// We iterate grid because some loaded tiles may not be present in trnIndexByCoord iteration order.
+	// --- Unload pass ---
 	int unloadsThisFrame = 0;
 	for (int ix = 0; ix < tilesX && unloadsThisFrame < budget; ++ix)
 	{
@@ -1079,13 +1077,9 @@ void Terrain::updateVisibleTiles(glm::mat4 view, glm::mat4 projection)
 			TileTerrain *t = tiles[ix][iz];
 			if (!t)
 			{
-				// ensure state consistent
-				if (tileState[ix][iz] != TileLoadState::Unloaded)
-					tileState[ix][iz] = TileLoadState::Unloaded;
+				tileState[ix][iz] = TileLoadState::Unloaded;
 				continue;
 			}
-
-			// If not Ready, skip (don't unload Loading or Unloading again)
 			if (tileState[ix][iz] != TileLoadState::Ready)
 				continue;
 
@@ -1097,47 +1091,28 @@ void Terrain::updateVisibleTiles(glm::mat4 view, glm::mat4 projection)
 			float dz = camPos.z - centerZ;
 			float dsq = dx * dx + dz * dz;
 
-			// If beyond unload radius — remove (with hysteresis)
 			if (dsq > unloadRadiusSq)
 			{
-				// mark unloading and delete (unloadTileAt will set state to Unloaded)
 				tileState[ix][iz] = TileLoadState::Unloading;
 				unloadTileAt(ix, iz);
 				tileState[ix][iz] = TileLoadState::Unloaded;
 				++unloadsThisFrame;
-				// optional debug:
-				// std::cout << "Unloaded tile ["<<gx<<"]["<<gz<<"]\n";
 			}
 		}
 	}
 
-	// --- Build visible list from Ready tiles within renderRadius (no frustum for now) ---
+	// --- Build visible list ---
 	std::vector<TileTerrain *> newVisible;
 	newVisible.reserve((renderRadiusTiles * 2 + 1) * (renderRadiusTiles * 2 + 1));
-	// compute a tight index rectangle for render radius to iterate only necessary tiles
-	int wantVisGX0 = camTileX - renderRadiusTiles;
-	int wantVisGX1 = camTileX + renderRadiusTiles;
-	int wantVisGZ0 = camTileZ - renderRadiusTiles;
-	int wantVisGZ1 = camTileZ + renderRadiusTiles;
 
-	wantVisGX0 = std::max(wantVisGX0, tileMinX);
-	wantVisGZ0 = std::max(wantVisGZ0, tileMinZ);
-	wantVisGX1 = std::min(wantVisGX1, tileMaxX);
-	wantVisGZ1 = std::min(wantVisGZ1, tileMaxZ);
-
-	int vix0 = wantVisGX0 - tileMinX;
-	int viz0 = wantVisGZ0 - tileMinZ;
-	int vix1 = wantVisGX1 - tileMinX;
-	int viz1 = wantVisGZ1 - tileMinZ;
-
-	vix0 = std::clamp(vix0, 0, std::max(0, tilesX - 1));
-	viz0 = std::clamp(viz0, 0, std::max(0, tilesZ - 1));
-	vix1 = std::clamp(vix1, 0, std::max(0, tilesX - 1));
-	viz1 = std::clamp(viz1, 0, std::max(0, tilesZ - 1));
+	int vix0 = std::clamp(camTileX - renderRadiusTiles - tileMinX, 0, tilesX - 1);
+	int viz0 = std::clamp(camTileZ - renderRadiusTiles - tileMinZ, 0, tilesZ - 1);
+	int vix1 = std::clamp(camTileX + renderRadiusTiles - tileMinX, 0, tilesX - 1);
+	int viz1 = std::clamp(camTileZ + renderRadiusTiles - tileMinZ, 0, tilesZ - 1);
 
 	for (int ix = vix0; ix <= vix1; ++ix)
 	{
-		for (int iz = viz0; iz <= viz1; ++iz)
+		for (int iz = viz1; iz >= viz0; --iz) // обратный порядок
 		{
 			if (tileState[ix][iz] != TileLoadState::Ready)
 				continue;
@@ -1148,10 +1123,8 @@ void Terrain::updateVisibleTiles(glm::mat4 view, glm::mat4 projection)
 				continue;
 			}
 
-			int gx = ix + tileMinX;
-			int gz = iz + tileMinZ;
-			float centerX = (gx + 0.5f) * tileSize;
-			float centerZ = (gz + 0.5f) * tileSize;
+			float centerX = (ix + tileMinX + 0.5f) * tileSize;
+			float centerZ = (iz + tileMinZ + 0.5f) * tileSize;
 			float dx = camPos.x - centerX;
 			float dz = camPos.z - centerZ;
 			float dsq = dx * dx + dz * dz;
@@ -1162,9 +1135,6 @@ void Terrain::updateVisibleTiles(glm::mat4 view, glm::mat4 projection)
 	}
 
 	visibleTiles.swap(newVisible);
-
-	// Optionally emit a single line debug every frame (uncomment for dev)
-	// std::cout << "updateVisibleTiles: candidates=" << candidates.size() << " loads=" << loadsThisFrame << " unloads=" << unloadsThisFrame << " visible=" << visibleTiles.size() << std::endl;
 }
 
 //! Renders terrain and physics geometry meshes.
@@ -1173,10 +1143,6 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool rende
 	if (!terrainLoaded)
 		return;
 
-	// Update visible tiles (schedules loads/unloads and prepares visibleTiles)
-	updateVisibleTiles(view, projection);
-
-	// Prepare shader + common uniforms
 	shader.use();
 	shader.setMat4("model", glm::mat4(1.0f));
 	shader.setMat4("view", view);
@@ -1185,7 +1151,9 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool rende
 	shader.setVec3("lightPos", glm::vec3(camera.Position.x, camera.Position.y + 600.0f, camera.Position.z));
 	shader.setVec3("cameraPos", camera.Position);
 
-	// --- Pass 1: terrain (filled) ---
+	updateVisibleTiles(view, projection);
+
+	// render terrain
 	if (!simple)
 		shader.setInt("renderMode", 1);
 	else
@@ -1193,14 +1161,11 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool rende
 
 	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
-	for (size_t i = 0; i < visibleTiles.size(); ++i)
+	for (int i = 0, n = visibleTiles.size(); i < n; i++)
 	{
 		TileTerrain *tile = visibleTiles[i];
-		if (!tile)
-			continue;
 
-		// defensive checks: VAO exists and vertex count > 0
-		if (tile->trnVAO == 0 || tile->terrainVertexCount == 0)
+		if (!tile || tile->terrainVertices.empty())
 			continue;
 
 		glBindVertexArray(tile->trnVAO);
@@ -1208,67 +1173,63 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool rende
 		glBindVertexArray(0);
 	}
 
-	// --- Pass 2: physics filled (if any) ---
-	// We'll draw filled physics geometry first (renderMode = 4)
-	shader.setInt("renderMode", 4);
-	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-
-	for (size_t i = 0; i < visibleTiles.size(); ++i)
+	// render walkable surfaces
+	if (renderNavMesh)
 	{
-		TileTerrain *tile = visibleTiles[i];
-		if (!tile)
-			continue;
+		shader.setInt("renderMode", 5);
 
-		if (tile->phyVAO == 0 || tile->physicsVertexCount == 0)
-			continue;
-
-		glBindVertexArray(tile->phyVAO);
-		glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
-		glBindVertexArray(0);
-	}
-
-	// --- Pass 3: physics wireframe overlay (if any) ---
-	// Use a different render mode and wireframe polygon mode
-	shader.setInt("renderMode", 2);
-	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-
-	for (size_t i = 0; i < visibleTiles.size(); ++i)
-	{
-		TileTerrain *tile = visibleTiles[i];
-		if (!tile)
-			continue;
-
-		if (tile->phyVAO == 0 || tile->physicsVertexCount == 0)
-			continue;
-
-		glBindVertexArray(tile->phyVAO);
-		glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
-		glBindVertexArray(0);
-	}
-
-	// restore polygon mode to fill for subsequent passes
-	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-
-	// --- Pass 4: water and 3D models ---
-	// Water and models likely use their own VAOs / shaders internally; call their draw methods.
-	for (size_t i = 0; i < visibleTiles.size(); ++i)
-	{
-		TileTerrain *tile = visibleTiles[i];
-		if (!tile)
-			continue;
-
-		// water.draw is expected to handle its own GL state and shader inputs (it was used earlier)
-		tile->water.draw(view, projection, light.showLighting, simple, dt, camera.Position);
-
-		// draw models (if any)
-		for (size_t m = 0; m < tile->models.size(); ++m)
+		for (int i = 0, n = visibleTiles.size(); i < n; i++)
 		{
-			if (tile->models[m])
-				tile->models[m]->draw(view, projection, camera.Position, light.showLighting, simple);
+			TileTerrain *tile = visibleTiles[i];
+
+			if (!tile || tile->navigationVertices.empty())
+				continue;
+
+			glBindVertexArray(tile->navVAO);
+
+			glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+			glDrawArrays(GL_TRIANGLES, 0, tile->navmeshVertexCount);
+
+			glBindVertexArray(0);
 		}
 	}
 
-	// --- Pass 5: skybox (last, special depth func) ---
+	// render physics
+	for (int i = 0, n = visibleTiles.size(); i < n; i++)
+	{
+		TileTerrain *tile = visibleTiles[i];
+
+		if (!tile || tile->physicsVertices.empty())
+			continue;
+
+		glBindVertexArray(tile->phyVAO);
+
+		shader.setInt("renderMode", 4);
+		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+		glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
+
+		shader.setInt("renderMode", 2);
+		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+		glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
+
+		glBindVertexArray(0);
+	}
+
+	// render water and 3D models
+	for (int i = 0, n = visibleTiles.size(); i < n; i++)
+	{
+		TileTerrain *tile = visibleTiles[i];
+
+		if (!tile)
+			continue;
+
+		tile->water.draw(view, projection, light.showLighting, simple, dt, camera.Position);
+
+		for (int k = 0, n = tile->models.size(); k < n; k++)
+			tile->models[k]->draw(view, projection, camera.Position, light.showLighting, simple);
+	}
+
+	// render skybox
 	if (!simple)
 	{
 		glDepthFunc(GL_LEQUAL);
@@ -1276,9 +1237,5 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool rende
 		glDepthFunc(GL_LESS);
 	}
 
-	// Clean up: ensure no VAO left bound
 	glBindVertexArray(0);
-
-	// Restore polygon mode & other GL states if your engine relies on defaults elsewhere
-	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 }

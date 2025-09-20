@@ -1,6 +1,7 @@
 #ifndef PARSER_TERRAIN_H
 #define PARSER_TERRAIN_H
 
+#include <future>
 #include <string>
 #include <vector>
 #include "libs/glm/glm.hpp"
@@ -19,6 +20,7 @@
 #include "DetourNavMesh.h"
 
 #include <unordered_map>
+#include <unordered_set>
 
 const int visibleRadiusTiles = 4; // 3 tiles each direction -> (2*2+1)^2 = 25 tiles
 
@@ -30,6 +32,18 @@ class TileTerrain;
 class Terrain
 {
   public:
+	struct PendingTileLoad
+	{
+		std::future<TileTerrain *> fut;
+		int ix, iz;
+		int gx, gz;
+
+		PendingTileLoad(std::future<TileTerrain *> &&f, int ix_, int iz_, int gx_, int gz_)
+			: fut(std::move(f)), ix(ix_), iz(iz_), gx(gx_), gz(gz_)
+		{
+		}
+	};
+
 	Shader shader;
 	Camera &camera;
 	Light &light;
@@ -57,13 +71,14 @@ class Terrain
 	// mapping from tile coords -> index in archive (so we can find a tile file fast) // key = (tileX<<32) | (tileZ & 0xffffffff)
 
 	// a small queue for tiles to load; coordinates are global tile coordinates
-	std::vector<std::pair<int, int>> pendingTileLoads;
+	std::vector<PendingTileLoad> pendingTileLoads;
+	std::unordered_set<long long> pendingTileKeys;
 
 	// control how many tiles we allow to load per frame to reduce stalls
 	int maxTilesToLoadPerFrame = 2;
 
 	// load a single tile from the opened archives and prepare its GL buffers
-	bool loadTileAt(int gridX, int gridZ);
+	std::future<TileTerrain *> loadTileAsync(int gx, int gz);
 
 	// unload a single tile (free GL and CPU memory)
 	void unloadTileAt(int indexX, int indexZ);
