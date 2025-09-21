@@ -67,6 +67,10 @@ class Water
 	{
 		if (vertices.empty())
 			return;
+		if (VAO == 0 || VBO == 0)
+			return;
+		if (waterVertexCount == 0)
+			return;
 
 		shader.use();
 		shader.setMat4("model", glm::mat4(1.0f));

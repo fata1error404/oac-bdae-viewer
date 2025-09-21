@@ -71,6 +71,7 @@ class TileTerrain
 	std::vector<Physics *> physicsGeometry;									 // .phy models
 	std::vector<Model *> models;											 // .bdae models
 	Water water;															 // water surface
+	bool trnLoaded;
 
 	float startX, startZ;							 // position on the grid in world space coordinates
 	float Y[UnitsInTileRow + 1][UnitsInTileCol + 1]; // height map (unscaled)
@@ -88,7 +89,9 @@ class TileTerrain
 		  phyVAO(0), phyVBO(0),
 		  terrainVertexCount(0),
 		  navmeshVertexCount(0),
-		  physicsVertexCount(0)
+		  physicsVertexCount(0),
+		  BBox(VEC3(0, 0, 0), VEC3(0, 0, 0)),
+		  trnLoaded(false)
 	{
 		memset(&chunks, 0, sizeof(chunks));
 		memset(&Y, 0, sizeof(Y));
@@ -122,6 +125,8 @@ class TileTerrain
 		models.clear();
 
 		water.release();
+
+		trnLoaded = false;
 	}
 
 	//! Processes a single .trn file and returns a newly created TileTerrain object with the tile's mesh data saved.
