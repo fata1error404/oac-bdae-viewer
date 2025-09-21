@@ -113,7 +113,7 @@ void Terrain::load(const char *fpath, Sound &sound)
 	// load skybox
 	std::string terrainName = std::filesystem::path(fpath).filename().string();
 	std::string skyboxName = "model/skybox/" + terrainName.replace(terrainName.size() - 4, 4, "") + ".bdae";
-	skybox.load(skyboxName.c_str(), glm::mat4(1.0f), sound, true);
+	skybox.load(skyboxName.c_str(), sound, true);
 
 	// set camera starting point
 	if (terrainName == "pvp_eristar_ruin")
@@ -206,51 +206,49 @@ void Terrain::uploadToGPU(TileTerrain *tile)
 		glEnableVertexAttribArray(5);
 
 		glBindVertexArray(0);
-
-		tile->trnLoaded = true;
 	}
 
-	// if (!tile->water.vertices.empty())
-	// {
-	// 	glGenVertexArrays(1, &tile->water.VAO);
-	// 	glGenBuffers(1, &tile->water.VBO);
+	if (!tile->water.vertices.empty())
+	{
+		glGenVertexArrays(1, &tile->water.VAO);
+		glGenBuffers(1, &tile->water.VBO);
 
-	// 	glBindVertexArray(tile->water.VAO);
-	// 	glBindBuffer(GL_ARRAY_BUFFER, tile->water.VBO);
-	// 	glBufferData(GL_ARRAY_BUFFER, tile->water.vertices.size() * sizeof(float), tile->water.vertices.empty() ? nullptr : tile->water.vertices.data(), GL_STATIC_DRAW);
-	// 	glEnableVertexAttribArray(0);
-	// 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)0);
-	// 	glEnableVertexAttribArray(1);
-	// 	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(3 * sizeof(float)));
-	// 	glEnableVertexAttribArray(2);
-	// 	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(6 * sizeof(float)));
+		glBindVertexArray(tile->water.VAO);
+		glBindBuffer(GL_ARRAY_BUFFER, tile->water.VBO);
+		glBufferData(GL_ARRAY_BUFFER, tile->water.vertices.size() * sizeof(float), tile->water.vertices.empty() ? nullptr : tile->water.vertices.data(), GL_STATIC_DRAW);
+		glEnableVertexAttribArray(0);
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)0);
+		glEnableVertexAttribArray(1);
+		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(3 * sizeof(float)));
+		glEnableVertexAttribArray(2);
+		glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(6 * sizeof(float)));
 
-	// 	glBindVertexArray(0);
-	// }
+		glBindVertexArray(0);
+	}
 
-	// if (!tile->physicsVertices.empty())
-	// {
-	// 	glGenVertexArrays(1, &tile->phyVAO);
-	// 	glGenBuffers(1, &tile->phyVBO);
-	// 	glBindVertexArray(tile->phyVAO);
-	// 	glBindBuffer(GL_ARRAY_BUFFER, tile->phyVBO);
-	// 	glBufferData(GL_ARRAY_BUFFER, tile->physicsVertices.size() * sizeof(float), tile->physicsVertices.data(), GL_STATIC_DRAW);
-	// 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
-	// 	glEnableVertexAttribArray(0);
-	// }
+	if (!tile->physicsVertices.empty())
+	{
+		glGenVertexArrays(1, &tile->phyVAO);
+		glGenBuffers(1, &tile->phyVBO);
+		glBindVertexArray(tile->phyVAO);
+		glBindBuffer(GL_ARRAY_BUFFER, tile->phyVBO);
+		glBufferData(GL_ARRAY_BUFFER, tile->physicsVertices.size() * sizeof(float), tile->physicsVertices.data(), GL_STATIC_DRAW);
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
+		glEnableVertexAttribArray(0);
+	}
 
-	// if (!tile->navigationVertices.empty())
-	// {
-	// 	glGenVertexArrays(1, &tile->navVAO);
-	// 	glGenBuffers(1, &tile->navVBO);
-	// 	glBindVertexArray(tile->navVAO);
-	// 	glBindBuffer(GL_ARRAY_BUFFER, tile->navVBO);
-	// 	GLsizeiptr bufSize = (GLsizeiptr)(tile->navigationVertices.size() * sizeof(float));
-	// 	glBufferData(GL_ARRAY_BUFFER, bufSize, tile->navigationVertices.data(), GL_STATIC_DRAW);
-	// 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
-	// 	glEnableVertexAttribArray(0);
-	// 	glBindVertexArray(0);
-	// }
+	if (!tile->navigationVertices.empty())
+	{
+		glGenVertexArrays(1, &tile->navVAO);
+		glGenBuffers(1, &tile->navVBO);
+		glBindVertexArray(tile->navVAO);
+		glBindBuffer(GL_ARRAY_BUFFER, tile->navVBO);
+		GLsizeiptr bufSize = (GLsizeiptr)(tile->navigationVertices.size() * sizeof(float));
+		glBufferData(GL_ARRAY_BUFFER, bufSize, tile->navigationVertices.data(), GL_STATIC_DRAW);
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
+		glEnableVertexAttribArray(0);
+		glBindVertexArray(0);
+	}
 }
 
 // Helper: safely delete GPU resources for a tile, but keep CPU-side data.
@@ -266,49 +264,49 @@ void Terrain::releaseFromGPU(TileTerrain *tile)
 	// if ((GLuint)curVAO == tile->trnVAO)
 	// 	glBindVertexArray(0);
 
-	if (tile->trnLoaded)
+	if (tile->trnVAO)
 	{
 		glDeleteVertexArrays(1, &tile->trnVAO);
 		tile->trnVAO = 0;
-
+	}
+	if (tile->trnVBO)
+	{
 		glDeleteBuffers(1, &tile->trnVBO);
 		tile->trnVBO = 0;
-
-		tile->trnLoaded = false;
 	}
 
-	// if (tile->navVAO)
-	// {
-	// 	glDeleteVertexArrays(1, &tile->navVAO);
-	// 	tile->navVAO = 0;
-	// }
-	// if (tile->navVBO)
-	// {
-	// 	glDeleteBuffers(1, &tile->navVBO);
-	// 	tile->navVBO = 0;
-	// }
+	if (tile->navVAO)
+	{
+		glDeleteVertexArrays(1, &tile->navVAO);
+		tile->navVAO = 0;
+	}
+	if (tile->navVBO)
+	{
+		glDeleteBuffers(1, &tile->navVBO);
+		tile->navVBO = 0;
+	}
 
-	// if (tile->phyVAO)
-	// {
-	// 	glDeleteVertexArrays(1, &tile->phyVAO);
-	// 	tile->phyVAO = 0;
-	// }
-	// if (tile->phyVBO)
-	// {
-	// 	glDeleteBuffers(1, &tile->phyVBO);
-	// 	tile->phyVBO = 0;
-	// }
+	if (tile->phyVAO)
+	{
+		glDeleteVertexArrays(1, &tile->phyVAO);
+		tile->phyVAO = 0;
+	}
+	if (tile->phyVBO)
+	{
+		glDeleteBuffers(1, &tile->phyVBO);
+		tile->phyVBO = 0;
+	}
 
-	// if (tile->water.VAO)
-	// {
-	// 	glDeleteVertexArrays(1, &tile->water.VAO);
-	// 	tile->water.VAO = 0;
-	// }
-	// if (tile->water.VBO)
-	// {
-	// 	glDeleteBuffers(1, &tile->water.VBO);
-	// 	tile->water.VBO = 0;
-	// }
+	if (tile->water.VAO)
+	{
+		glDeleteVertexArrays(1, &tile->water.VAO);
+		tile->water.VAO = 0;
+	}
+	if (tile->water.VBO)
+	{
+		glDeleteBuffers(1, &tile->water.VBO);
+		tile->water.VBO = 0;
+	}
 
 	// If models have GPU resources managed per-model, optionally call their unload:
 	// for (auto &m : tile->models)
@@ -978,6 +976,11 @@ void Terrain::getPhysicsVertices()
 					}
 				}
 			}
+
+			for (Physics *p : tile->physicsGeometry)
+				delete p;
+
+			tile->physicsGeometry.clear();
 		}
 }
 
@@ -1000,6 +1003,11 @@ void Terrain::reset()
 	tiles.clear();
 	tilesVisible.clear();
 	sounds.clear();
+
+	for (auto &[name, mesh] : g_phyMeshCache)
+		delete mesh;
+
+	g_phyMeshCache.clear();
 }
 
 // Replace the whole function in your file with this version.
@@ -1204,7 +1212,7 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool rende
 		if (!tile)
 			continue;
 
-		if (!tile->trnLoaded)
+		if (tile->trnVAO == 0 || tile->trnVBO == 0)
 			continue;
 
 		glBindVertexArray(tile->trnVAO);
@@ -1213,72 +1221,77 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool rende
 	}
 
 	// render walkable surfaces
-	// if (renderNavMesh)
-	// {
-	// 	shader.setInt("renderMode", 5);
+	if (renderNavMesh)
+	{
+		shader.setInt("renderMode", 5);
 
-	// 	for (int i = 0, n = tilesVisible.size(); i < n; i++)
-	// 	{
-	// 		TileTerrain *tile = tilesVisible[i];
+		for (TileTerrain *tile : tilesVisible)
+		{
+			if (!tile)
+				continue;
 
-	// 		if (!tile)
-	// 			continue;
+			if (tile->navVAO == 0 || tile->navVBO == 0)
+				continue;
 
-	// 		if (tile->navVAO == 0 || tile->navVBO == 0)
-	// 			continue;
+			glBindVertexArray(tile->navVAO);
 
-	// 		glBindVertexArray(tile->navVAO);
+			glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+			glDrawArrays(GL_TRIANGLES, 0, tile->navmeshVertexCount);
 
-	// 		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-	// 		glDrawArrays(GL_TRIANGLES, 0, tile->navmeshVertexCount);
+			glBindVertexArray(0);
+		}
+	}
 
-	// 		glBindVertexArray(0);
-	// 	}
-	// }
+	/* 	// render physics
+		for (TileTerrain *tile : tilesVisible)
+		{
+			if (!tile)
+				continue;
 
-	// render physics
-	// for (int i = 0, n = tilesVisible.size(); i < n; i++)
-	// {
-	// 	TileTerrain *tile = tilesVisible[i];
+			if (tile->phyVAO == 0 || tile->phyVBO == 0)
+				continue;
 
-	// 	if (!tile)
-	// 		continue;
+			glBindVertexArray(tile->phyVAO);
 
-	// 	if (tile->phyVAO == 0 || tile->phyVBO == 0)
-	// 		continue;
+			shader.setInt("renderMode", 4);
+			glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+			glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
 
-	// 	glBindVertexArray(tile->phyVAO);
+			shader.setInt("renderMode", 2);
+			glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+			glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
 
-	// 	shader.setInt("renderMode", 4);
-	// 	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-	// 	glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
-
-	// 	shader.setInt("renderMode", 2);
-	// 	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-	// 	glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
-
-	// 	glBindVertexArray(0);
-	// }
+			glBindVertexArray(0);
+		}
+	*/
 
 	// render water and 3D models
-	// for (int i = 0, n = tilesVisible.size(); i < n; i++)
-	// {
-	// 	TileTerrain *tile = tilesVisible[i];
+	for (TileTerrain *tile : tilesVisible)
+	{
+		if (!tile)
+			continue;
 
-	// 	if (!tile)
-	// 		continue;
+		tile->water.draw(view, projection, light.showLighting, simple, dt, camera.Position);
 
-	// 	tile->water.draw(view, projection, light.showLighting, simple, dt, camera.Position);
+		for (auto &mi : tile->models)
+		{
+			const std::shared_ptr<Model> &m = mi.first;
+			const glm::mat4 &instModel = mi.second;
 
-	// 	// for (int k = 0, n = tile->models.size(); k < n; k++)
-	// 	// 	tile->models[k]->draw(view, projection, camera.Position, light.showLighting, simple);
-	// }
+			if (!m)
+				continue;
+			if (!m->modelLoaded)
+				continue;
+
+			m->draw(instModel, view, projection, camera.Position, light.showLighting, simple);
+		}
+	}
 
 	// render skybox
 	if (!simple)
 	{
 		glDepthFunc(GL_LEQUAL);
-		skybox.draw(glm::mat4(glm::mat3(view)), projection, camera.Position, false, false);
+		skybox.draw(glm::mat4(1.0f), glm::mat4(glm::mat3(view)), projection, camera.Position, false, false);
 		glDepthFunc(GL_LESS);
 	}
 

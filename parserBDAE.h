@@ -60,7 +60,6 @@ class Model
 	std::vector<unsigned int> textures;
 	std::vector<std::string> sounds;
 	glm::vec3 meshCenter;
-	glm::mat4 model;
 
 	float meshPitch = 0.0f;
 	float meshYaw = 0.0f;
@@ -88,13 +87,13 @@ class Model
 	int init(IReadResFile *file);
 
 	//! Loads .bdae file from disk, calls the parser and searches for alternative textures and sounds.
-	void load(const char *fpath, glm::mat4 modelMatrix, Sound &sound, bool isTerrainViewer);
+	void load(const char *fpath, Sound &sound, bool isTerrainViewer);
 
 	//! Clears GPU memory and resets viewer state.
 	void reset();
 
 	//! Renders .bdae model.
-	void draw(glm::mat4 view, glm::mat4 projection, glm::vec3 cameraPos, bool lighting, bool simple);
+	void draw(glm::mat4 model, glm::mat4 view, glm::mat4 projection, glm::vec3 cameraPos, bool lighting, bool simple);
 };
 
 #endif

@@ -84,7 +84,7 @@ inline void loadTileEntities(CZipResReader *itemsArchive, CZipResReader *physics
 	itmFile->read(buffer, fileSize);
 	itmFile->drop();
 
-	/* 2. parse .itm file header, entity info section and namelist section, retrieve:
+	/* 2. parse file header, entity info section and namelist section, retrieve:
 		  From header:
 			– number of game objects in the tile (each object may consist of several entities)
 			– total number of entities
@@ -98,11 +98,6 @@ inline void loadTileEntities(CZipResReader *itemsArchive, CZipResReader *physics
 	EntityInfo *entityData = (EntityInfo *)(buffer + sizeof(ITMFileHeader));
 	int *stringData = (int *)(buffer + sizeof(ITMFileHeader) + sizeof(EntityInfo) * header->entityCount + 4);
 
-	/* 3. load physics and 3D model for every game object in the tile
-			For every base entity within a game object, execution sequence:
-			loadEntity() → Physics::load() → Model::load()..
-			____________________ */
-
 	// loop through each game object
 	for (int i = 0; i < header->fileCount; i++)
 	{
@@ -113,13 +108,17 @@ inline void loadTileEntities(CZipResReader *itemsArchive, CZipResReader *physics
 		for (char &c : tmpName)
 			c = std::tolower(c);
 
+		// skip '.beff' effect files ([TODO] load them as well)
+		if (tmpName.size() >= 5 && tmpName.compare(tmpName.size() - 5, 5, ".beff") == 0)
+			continue;
+
 		// std::cout << tmpName << std::endl;
 
 		// loop through each entity, filter those that are part of the i-th game object by index, and load them
 		for (int j = 0; j < header->entityCount; j++)
 		{
 			if (entityData[j].fileNameIdx == i)
-				loadEntity(physicsArchive, fileName, entityData[j], tile, VEC3(64.0f * header->gridX, 0, 64.0f * header->gridZ), terrain);
+				loadEntity(physicsArchive, tmpName.c_str(), entityData[j], tile, VEC3(64.0f * header->gridX, 0, 64.0f * header->gridZ), terrain);
 		}
 	}
 
@@ -135,7 +134,9 @@ inline void loadEntity(CZipResReader *physicsArchive, const char *fname, const E
 	case ENTITY_HOUSE:
 	case ENTITY_EFFECT:
 	{
-		// load .phy model
+		// 3. load .phy model
+		// ____________________
+
 		Physics *physicsGeom = Physics::load(physicsArchive, fname, entityInfo.type == ENTITY_HOUSE);
 
 		if (physicsGeom)
@@ -153,25 +154,6 @@ inline void loadEntity(CZipResReader *physicsArchive, const char *fname, const E
 
 			tile->BBox.addInternalBox(physicsGeom->m_groupAABB); // adjust tile's bounding box to include entity's geometry
 			tile->physicsGeometry.push_back(physicsGeom);		 // add a new physics geometry to TileTerrain object
-
-			// [TODO] implement geometry
-			// CPhysics::instance()->RegisterGeom(physicsGeom, &(tile->m_pGeomList));
-
-			// build OpenGL style model matrix: translate -> rotate -> scale
-			glm::mat4 model = glm::mat4(1.0f);
-			model = glm::translate(glm::mat4(1.0f), glm::vec3(entityInfo.relativePos.X + tileOff.X, entityInfo.relativePos.Y + tileOff.Y, entityInfo.relativePos.Z + tileOff.Z));
-			model *= glm::mat4_cast(glm::quat(-entityInfo.rotation.W, entityInfo.rotation.X, entityInfo.rotation.Y, entityInfo.rotation.Z));
-			model *= glm::scale(glm::mat4(1.0f), glm::vec3(entityInfo.scale.X, entityInfo.scale.Y, entityInfo.scale.Z));
-
-			// load .bdae model
-			Model *bdaeModel = new Model("shaders/model.vs", "shaders/model.fs");
-			Sound unused(true);
-			bdaeModel->load(fname, model, unused, true);
-
-			if (bdaeModel->modelLoaded)
-				tile->models.push_back(bdaeModel);
-
-			terrain.modelCount++;
 		}
 
 		break;
@@ -180,6 +162,44 @@ inline void loadEntity(CZipResReader *physicsArchive, const char *fname, const E
 	default:
 		std::cout << "[Warning] Unhandled entity type: " << entityInfo.type << std::endl;
 		break;
+	}
+
+	/* 4. load .bdae model
+	   Models are stored in global terrain's cache for memory optimization.
+	   This is handled via smart shared pointer (for each model) that does automatic reference counting and deletion. When model is found in cache, a copy of the shared pointer is created.
+	 ____________________ */
+
+	std::shared_ptr<Model> bdaeModel;
+
+	std::unordered_map<std::string, std::shared_ptr<Model>>::iterator it = bdaeModelCache.find(fname);
+
+	if (it != bdaeModelCache.end()) // reuse cached model
+		bdaeModel = it->second;
+	else // not cached — create, load and insert to cache on success
+	{
+		std::shared_ptr<Model> newModel = std::make_shared<Model>("shaders/model.vs", "shaders/model.fs"); // create new model object and init shared pointer to handle its ownership
+		Sound empty(true);
+		newModel->load(fname, empty, true);
+
+		if (newModel->modelLoaded)
+		{
+			bdaeModel = newModel;
+			bdaeModelCache.emplace(fname, bdaeModel); // add to global cache with filename as a key for quick lookup
+		}
+		else
+			std::cout << "[Debug] loadEntity: failed to load " << fname << std::endl;
+	}
+
+	if (bdaeModel)
+	{
+		// build OpenGL style model matrix: translate -> rotate -> scale
+		glm::mat4 model = glm::mat4(1.0f);
+		model = glm::translate(glm::mat4(1.0f), glm::vec3(entityInfo.relativePos.X + tileOff.X, entityInfo.relativePos.Y + tileOff.Y, entityInfo.relativePos.Z + tileOff.Z));
+		model *= glm::mat4_cast(glm::quat(-entityInfo.rotation.W, entityInfo.rotation.X, entityInfo.rotation.Y, entityInfo.rotation.Z));
+		model *= glm::scale(glm::mat4(1.0f), glm::vec3(entityInfo.scale.X, entityInfo.scale.Y, entityInfo.scale.Z));
+
+		tile->models.emplace_back(bdaeModel, model); // add to tile's data (entities may use the same .bdae model, but located / scaled differently in world space, so we store pairs shared pointer + model matrix)
+		terrain.modelCount++;
 	}
 }
 

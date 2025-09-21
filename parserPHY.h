@@ -75,6 +75,9 @@ struct PHYFileHeader
 	float halfSizeZ;
 };
 
+// global (transwlation unit) cache for phy meshes
+inline std::unordered_map<std::string, PhysicsRefMesh *> g_phyMeshCache;
+
 // Abstract class for the Geometry of physics.
 // ___________________________________________
 
@@ -138,6 +141,33 @@ class Physics
 			delete m_pNext;
 	}
 
+	void loadMeshUsingRef(unsigned char *buffer, PhysicsRefMesh *cached)
+	{
+		// почти как loadMesh, но НЕ выделяем/копируем vertex/faces arrays;
+		// а только заполняем остальные поля, и присваиваем m_refMesh = cached (и grab уже сделан вне)
+		PHYFileHeader *header = (PHYFileHeader *)buffer;
+
+		int offset = 8;
+		m_geomType = 7;
+
+		memcpy(&m_info.s32value, buffer + offset, sizeof(int));
+		memcpy(&m_pos.X, buffer + offset + 4, sizeof(float));
+		memcpy(&m_pos.Z, buffer + offset + 4 + sizeof(float), sizeof(float));
+		memcpy(&m_pos.Y, buffer + offset + 4 + 2 * sizeof(float), sizeof(float));
+		memcpy(&m_halfSize.X, buffer + offset + 4 + 3 * sizeof(float), sizeof(float));
+		memcpy(&m_halfSize.Z, buffer + offset + 4 + 4 * sizeof(float), sizeof(float));
+		memcpy(&m_halfSize.Y, buffer + 4 + offset + 5 * sizeof(float), sizeof(float));
+
+		// Read mesh header (we only need nv / nbFaces for some bookkeeping)
+		short nv = 0, nbFaces = 0;
+		memcpy(&nv, buffer + offset + 4 + 6 * sizeof(float), sizeof(short));
+		memcpy(&nbFaces, buffer + offset + 4 + 6 * sizeof(float) + sizeof(short), sizeof(short));
+
+		// assign cached refmesh
+		m_refMesh = cached;
+		// Note: cached->grab() must be called by caller before/after this call.
+	}
+
 	//!
 	static Physics *load(CZipResReader *archive, const char *fname, bool isEntityHouse)
 	{
@@ -168,8 +198,28 @@ class Physics
 
 			if (type == PHYSICS_GEOM_TYPE_MESH)
 			{
-				node = new Physics();
-				node->loadMesh(buffer);
+				// check cache
+				auto it = g_phyMeshCache.find(tmpName);
+
+				if (it != g_phyMeshCache.end())
+				{
+					// use cached refmesh
+					node = new Physics();
+					// caller must ensure cached->grab() is called to increment refcount
+					it->second->grab();
+					node->loadMeshUsingRef(buffer, it->second);
+				}
+				else
+				{
+					node = new Physics();
+					node->loadMesh(buffer); // this creates node->m_refMesh = new PhysicsRefMesh(...)
+					// store in cache and increase refcount for cache owner
+					if (node->m_refMesh)
+					{
+						node->m_refMesh->grab(); // now refcount: node (1) + cache (1) = 2
+						g_phyMeshCache[tmpName] = node->m_refMesh;
+					}
+				}
 			}
 			else
 			{

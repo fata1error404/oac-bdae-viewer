@@ -261,7 +261,7 @@ int Model::init(IReadResFile *file)
 }
 
 //! Loads .bdae file from disk, calls the parser and searches for alternative textures and sounds.
-void Model::load(const char *fpath, glm::mat4 modelMatrix, Sound &sound, bool isTerrainViewer)
+void Model::load(const char *fpath, Sound &sound, bool isTerrainViewer)
 {
 	reset();
 
@@ -273,16 +273,26 @@ void Model::load(const char *fpath, glm::mat4 modelMatrix, Sound &sound, bool is
 	else
 		bdaeArchive = new CPackPatchReader(fpath, true, false);
 
+	if (!bdaeArchive)
+		return;
+
 	IReadResFile *bdaeFile = bdaeArchive->openFile("little_endian_not_quantized.bdae"); // open inner .bdae file
 
 	if (!bdaeFile)
+	{
+		delete bdaeArchive;
 		return;
+	}
 
 	// 2. run the parser
 	int result = init(bdaeFile);
 
 	if (result != 0)
+	{
+		delete bdaeFile;
+		delete bdaeArchive;
 		return;
+	}
 
 	if (!isTerrainViewer) // 3D model viewer
 	{
@@ -528,8 +538,6 @@ void Model::load(const char *fpath, glm::mat4 modelMatrix, Sound &sound, bool is
 	}
 	else // terrain viewer
 	{
-		model = modelMatrix;
-
 		for (int i = 0, n = (int)textureNames.size(); i < n; i++)
 		{
 			std::string &s = textureNames[i];
@@ -587,7 +595,7 @@ void Model::load(const char *fpath, glm::mat4 modelMatrix, Sound &sound, bool is
 
 		// set the texture wrapping parameters
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT); // for s (x) axis
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT); // for t (y) axis R
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT); // for t (y) axis
 
 		// set texture filtering parameters
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -643,7 +651,7 @@ void Model::reset()
 }
 
 //! Renders .bdae model.
-void Model::draw(glm::mat4 view, glm::mat4 projection, glm::vec3 cameraPos, bool lighting, bool simple)
+void Model::draw(glm::mat4 model, glm::mat4 view, glm::mat4 projection, glm::vec3 cameraPos, bool lighting, bool simple)
 {
 	if (!modelLoaded)
 		return;

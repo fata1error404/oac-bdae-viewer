@@ -2,6 +2,9 @@
 #define PARSER_TRN_H
 
 #include <vector>
+#include <memory>  // for std::shared_ptr
+#include <utility> // for std::pair
+#include <unordered_map>
 #include "libs/glm/glm.hpp"
 #include "AABB.h"
 #include "Quaternion.h"
@@ -20,6 +23,8 @@
 #define DEFAULT_LOAD_BUFFER_SIZE 102400 // 100 KB
 
 static unsigned char loadBuffer[DEFAULT_LOAD_BUFFER_SIZE]; // static read buffer to load .trn files into memory without dynamic allocation
+
+static std::unordered_map<std::string, std::shared_ptr<Model>> bdaeModelCache; // terrain's global cache for .bdae models (key — filename, value — shared pointer)
 
 // 1 tile = 8 × 8 chunks = 64 × 64 units = 65 x 65 vertices
 
@@ -69,9 +74,8 @@ class TileTerrain
 	unsigned int terrainVertexCount, navmeshVertexCount, physicsVertexCount;
 	std::vector<float> terrainVertices, navigationVertices, physicsVertices; // vertex data
 	std::vector<Physics *> physicsGeometry;									 // .phy models
-	std::vector<Model *> models;											 // .bdae models
+	std::vector<std::pair<std::shared_ptr<Model>, glm::mat4>> models;		 // .bdae models
 	Water water;															 // water surface
-	bool trnLoaded;
 
 	float startX, startZ;							 // position on the grid in world space coordinates
 	float Y[UnitsInTileRow + 1][UnitsInTileCol + 1]; // height map (unscaled)
@@ -90,8 +94,7 @@ class TileTerrain
 		  terrainVertexCount(0),
 		  navmeshVertexCount(0),
 		  physicsVertexCount(0),
-		  BBox(VEC3(0, 0, 0), VEC3(0, 0, 0)),
-		  trnLoaded(false)
+		  BBox(VEC3(0, 0, 0), VEC3(0, 0, 0))
 	{
 		memset(&chunks, 0, sizeof(chunks));
 		memset(&Y, 0, sizeof(Y));
@@ -114,19 +117,9 @@ class TileTerrain
 		navigationVertices.clear();
 		physicsVertices.clear();
 
-		for (Physics *p : physicsGeometry)
-			delete p;
-
-		physicsGeometry.clear();
-
-		for (Model *m : models)
-			delete m;
-
 		models.clear();
 
 		water.release();
-
-		trnLoaded = false;
 	}
 
 	//! Processes a single .trn file and returns a newly created TileTerrain object with the tile's mesh data saved.

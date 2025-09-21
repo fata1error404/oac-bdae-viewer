@@ -238,7 +238,7 @@ int main()
 				std::map<std::string, std::string> selection = IGFD::FileDialog::Instance()->GetSelection(); // returns pairs (file name, full path)
 
 				if (!isTerrainViewer)
-					bdaeModel.load(selection.begin()->second.c_str(), glm::mat4(0.0f), ourSound, isTerrainViewer);
+					bdaeModel.load(selection.begin()->second.c_str(), ourSound, isTerrainViewer);
 				else
 					terrainModel.load(selection.begin()->second.c_str(), ourSound);
 			}
@@ -315,7 +315,7 @@ int main()
 
 		if (!isTerrainViewer && bdaeModel.modelLoaded)
 		{
-			bdaeModel.draw(view, projection, ourCamera.Position, ourLight.showLighting, displayBaseMesh); // render model
+			bdaeModel.draw(glm::mat4(1.0f), view, projection, ourCamera.Position, ourLight.showLighting, displayBaseMesh); // render model
 
 			ourLight.draw(view, projection); // render light cube
 		}
