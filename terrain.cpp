@@ -739,130 +739,132 @@ void Terrain::getPhysicsVertices()
 			if (!tile || tile->physicsGeometry.empty())
 				continue;
 
-			for (Physics *geom : tile->physicsGeometry)
+			// iterate every head in the physicsGeometry vector, and then traverse its linked list (pNext)
+			for (Physics *headGeom : tile->physicsGeometry)
 			{
-				int type = geom->geometryType;
-
-				// --- BOX: emit 12 tris (6 faces × 2) ---
-				if (type == PHYSICS_GEOM_TYPE_BOX)
+				for (Physics *geom = headGeom; geom; geom = geom->pNext)
 				{
-					VEC3 &h = geom->halfSize;
-					VEC3 v[8] = {
-						{-h.X, +h.Y, -h.Z}, {+h.X, +h.Y, -h.Z}, {+h.X, -h.Y, -h.Z}, {-h.X, -h.Y, -h.Z}, {-h.X, +h.Y, +h.Z}, {+h.X, +h.Y, +h.Z}, {+h.X, -h.Y, +h.Z}, {-h.X, -h.Y, +h.Z}};
-					for (auto &vv : v)
-						geom->model.transformVect(vv);
-					// correct faces: front, back, left, right, top, bottom
-					int F[6][4] = {
-						{0, 1, 2, 3}, {5, 4, 7, 6}, {0, 3, 7, 4}, {1, 5, 6, 2}, {0, 4, 5, 1}, {3, 2, 6, 7}};
-					for (int f = 0; f < 6; ++f)
+					int type = geom->geometryType;
+
+					// --- BOX: emit 12 tris (6 faces × 2) ---
+					if (type == PHYSICS_GEOM_TYPE_BOX)
 					{
-						int a = F[f][0], b = F[f][1], c = F[f][2], d = F[f][3];
-						// tri1 (a,b,c), tri2 (a,c,d)
-						tile->physicsVertices.insert(tile->physicsVertices.end(), {v[a].X, v[a].Y, v[a].Z, v[b].X, v[b].Y, v[b].Z, v[c].X, v[c].Y, v[c].Z,
-																				   v[a].X, v[a].Y, v[a].Z, v[c].X, v[c].Y, v[c].Z, v[d].X, v[d].Y, v[d].Z});
+						VEC3 &h = geom->halfSize;
+						VEC3 v[8] = {
+							{-h.X, +h.Y, -h.Z}, {+h.X, +h.Y, -h.Z}, {+h.X, -h.Y, -h.Z}, {-h.X, -h.Y, -h.Z}, {-h.X, +h.Y, +h.Z}, {+h.X, +h.Y, +h.Z}, {+h.X, -h.Y, +h.Z}, {-h.X, -h.Y, +h.Z}};
+						for (auto &vv : v)
+							geom->model.transformVect(vv);
+						// correct faces: front, back, left, right, top, bottom
+						int F[6][4] = {
+							{0, 1, 2, 3}, {5, 4, 7, 6}, {0, 3, 7, 4}, {1, 5, 6, 2}, {0, 4, 5, 1}, {3, 2, 6, 7}};
+						for (int f = 0; f < 6; ++f)
+						{
+							int a = F[f][0], b = F[f][1], c = F[f][2], d = F[f][3];
+							// tri1 (a,b,c), tri2 (a,c,d)
+							tile->physicsVertices.insert(tile->physicsVertices.end(), {v[a].X, v[a].Y, v[a].Z, v[b].X, v[b].Y, v[b].Z, v[c].X, v[c].Y, v[c].Z,
+																					   v[a].X, v[a].Y, v[a].Z, v[c].X, v[c].Y, v[c].Z, v[d].X, v[d].Y, v[d].Z});
+						}
 					}
-				}
-				// --- CYLINDER (unchanged) ---
-				else if (type == PHYSICS_GEOM_TYPE_CYLINDER)
-				{
-					const int CUT_NUM = 16;
-					const float pi = 3.14159265359f;
-					float angle_step = 2.0f * pi / CUT_NUM;
-					float radius = geom->halfSize.X;
-					float height = geom->halfSize.Y;
-
-					int myoffset = 0.5 * radius;
-
-					// Local center points
-					VEC3 centerBottom(myoffset, -height, -myoffset);
-					VEC3 centerTop(myoffset, height, -myoffset);
-					geom->model.transformVect(centerBottom);
-					geom->model.transformVect(centerTop);
-
-					for (int s = 0; s < CUT_NUM; s++)
+					// --- CYLINDER (unchanged) ---
+					else if (type == PHYSICS_GEOM_TYPE_CYLINDER)
 					{
-						float angle0 = s * angle_step;
-						float angle1 = (s + 1) * angle_step;
+						const int CUT_NUM = 16;
+						const float pi = 3.14159265359f;
+						float angle_step = 2.0f * pi / CUT_NUM;
+						float radius = geom->halfSize.X;
+						float height = geom->halfSize.Y;
 
-						float x0 = radius * cosf(angle0) + myoffset, z0 = radius * sinf(angle0) - myoffset;
-						float x1 = radius * cosf(angle1) + myoffset, z1 = radius * sinf(angle1) - myoffset;
+						int myoffset = 0.5 * radius;
 
-						// Local space points
-						VEC3 b0(x0, -height, z0);
-						VEC3 b1(x1, -height, z1);
-						VEC3 t0(x0, +height, z0);
-						VEC3 t1(x1, +height, z1);
+						// Local center points
+						VEC3 centerBottom(myoffset, -height, -myoffset);
+						VEC3 centerTop(myoffset, height, -myoffset);
+						geom->model.transformVect(centerBottom);
+						geom->model.transformVect(centerTop);
 
-						// Transform to world
-						geom->model.transformVect(b0);
-						geom->model.transformVect(b1);
-						geom->model.transformVect(t0);
-						geom->model.transformVect(t1);
+						for (int s = 0; s < CUT_NUM; s++)
+						{
+							float angle0 = s * angle_step;
+							float angle1 = (s + 1) * angle_step;
 
-						// --- Bottom Cap (CCW when viewed from below)
-						tile->physicsVertices.insert(tile->physicsVertices.end(), {b1.X, b1.Y, b1.Z,
-																				   b0.X, b0.Y, b0.Z,
-																				   centerBottom.X, centerBottom.Y, centerBottom.Z});
+							float x0 = radius * cosf(angle0) + myoffset, z0 = radius * sinf(angle0) - myoffset;
+							float x1 = radius * cosf(angle1) + myoffset, z1 = radius * sinf(angle1) - myoffset;
 
-						// --- Top Cap (CCW when viewed from above)
-						tile->physicsVertices.insert(tile->physicsVertices.end(), {t0.X, t0.Y, t0.Z,
-																				   t1.X, t1.Y, t1.Z,
-																				   centerTop.X, centerTop.Y, centerTop.Z});
+							// Local space points
+							VEC3 b0(x0, -height, z0);
+							VEC3 b1(x1, -height, z1);
+							VEC3 t0(x0, +height, z0);
+							VEC3 t1(x1, +height, z1);
 
-						// --- Side Face (two triangles)
-						tile->physicsVertices.insert(tile->physicsVertices.end(), {b0.X, b0.Y, b0.Z,
-																				   t0.X, t0.Y, t0.Z,
-																				   t1.X, t1.Y, t1.Z});
+							// Transform to world
+							geom->model.transformVect(b0);
+							geom->model.transformVect(b1);
+							geom->model.transformVect(t0);
+							geom->model.transformVect(t1);
 
-						tile->physicsVertices.insert(tile->physicsVertices.end(), {b0.X, b0.Y, b0.Z,
-																				   t1.X, t1.Y, t1.Z,
-																				   b1.X, b1.Y, b1.Z});
+							// --- Bottom Cap (CCW when viewed from below)
+							tile->physicsVertices.insert(tile->physicsVertices.end(), {b1.X, b1.Y, b1.Z,
+																					   b0.X, b0.Y, b0.Z,
+																					   centerBottom.X, centerBottom.Y, centerBottom.Z});
+
+							// --- Top Cap (CCW when viewed from above)
+							tile->physicsVertices.insert(tile->physicsVertices.end(), {t0.X, t0.Y, t0.Z,
+																					   t1.X, t1.Y, t1.Z,
+																					   centerTop.X, centerTop.Y, centerTop.Z});
+
+							// --- Side Face (two triangles)
+							tile->physicsVertices.insert(tile->physicsVertices.end(), {b0.X, b0.Y, b0.Z,
+																					   t0.X, t0.Y, t0.Z,
+																					   t1.X, t1.Y, t1.Z});
+
+							tile->physicsVertices.insert(tile->physicsVertices.end(), {b0.X, b0.Y, b0.Z,
+																					   t1.X, t1.Y, t1.Z,
+																					   b1.X, b1.Y, b1.Z});
+						}
 					}
-				}
 
-				// --- MESH: emit each face as one triangle ---
-				else if (type == PHYSICS_GEOM_TYPE_MESH)
-				{
-					// try local vectors first, fallback на cached buffers
-					const auto *facePtr = !geom->indices.empty() ? &geom->indices
-																 : (geom->mesh ? &geom->mesh->second : nullptr);
-					const auto *vertPtr = !geom->vertices.empty() ? &geom->vertices
-																  : (geom->mesh ? &geom->mesh->first : nullptr);
-
-					if (!facePtr || !vertPtr || facePtr->empty() || vertPtr->empty())
-						continue;
-
-					const float RENDER_H_OFF = 0.10f;
-					int F = static_cast<int>(facePtr->size() / PHYSICS_FACE_SIZE);
-					const auto &face = *facePtr;
-					const auto &vert = *vertPtr;
-
-					// safety: check bounds optionally
-					for (int f = 0; f < F; ++f)
+					// --- MESH: emit each face as one triangle ---
+					else if (type == PHYSICS_GEOM_TYPE_MESH)
 					{
-						int a = face[4 * f];
-						int b = face[4 * f + 1];
-						int c = face[4 * f + 2];
+						// try local vectors first, fallback на cached buffers
+						const auto *facePtr = geom->mesh ? &geom->mesh->second : nullptr;
+						const auto *vertPtr = geom->mesh ? &geom->mesh->first : nullptr;
 
-						// guard against bad indices
-						if ((3 * a + 2) >= (int)vert.size() || (3 * b + 2) >= (int)vert.size() || (3 * c + 2) >= (int)vert.size())
+						if (!facePtr || !vertPtr || facePtr->empty() || vertPtr->empty())
 							continue;
 
-						VEC3 v0(vert[3 * a], vert[3 * a + 1] + RENDER_H_OFF, -vert[3 * a + 2]);
-						VEC3 v1(vert[3 * b], vert[3 * b + 1] + RENDER_H_OFF, -vert[3 * b + 2]);
-						VEC3 v2(vert[3 * c], vert[3 * c + 1] + RENDER_H_OFF, -vert[3 * c + 2]);
+						const float RENDER_H_OFF = 0.10f;
+						int F = static_cast<int>(facePtr->size() / PHYSICS_FACE_SIZE);
+						const auto &face = *facePtr;
+						const auto &vert = *vertPtr;
 
-						geom->model.transformVect(v0);
-						geom->model.transformVect(v1);
-						geom->model.transformVect(v2);
+						// safety: check bounds optionally
+						for (int f = 0; f < F; ++f)
+						{
+							int a = face[4 * f];
+							int b = face[4 * f + 1];
+							int c = face[4 * f + 2];
 
-						// Fix winding after mirroring: v0 → v2 → v1
-						tile->physicsVertices.insert(tile->physicsVertices.end(), {v0.X, v0.Y, v0.Z,
-																				   v2.X, v2.Y, v2.Z,
-																				   v1.X, v1.Y, v1.Z});
+							// guard against bad indices
+							if ((3 * a + 2) >= (int)vert.size() || (3 * b + 2) >= (int)vert.size() || (3 * c + 2) >= (int)vert.size())
+								continue;
+
+							VEC3 v0(vert[3 * a], vert[3 * a + 1] + RENDER_H_OFF, -vert[3 * a + 2]);
+							VEC3 v1(vert[3 * b], vert[3 * b + 1] + RENDER_H_OFF, -vert[3 * b + 2]);
+							VEC3 v2(vert[3 * c], vert[3 * c + 1] + RENDER_H_OFF, -vert[3 * c + 2]);
+
+							geom->model.transformVect(v0);
+							geom->model.transformVect(v1);
+							geom->model.transformVect(v2);
+
+							// Fix winding after mirroring: v0 → v2 → v1
+							tile->physicsVertices.insert(tile->physicsVertices.end(), {v0.X, v0.Y, v0.Z,
+																					   v2.X, v2.Y, v2.Z,
+																					   v1.X, v1.Y, v1.Z});
+						}
 					}
-				}
-			}
+				} // end traverse linked list
+			} // end iterate heads
 
 			// mark where the triangle section ends
 			tile->physicsVertexCount = tile->physicsVertices.size() / 3;
@@ -877,120 +879,123 @@ void Terrain::getPhysicsVertices()
 
 			TileTerrain *tile = tiles[i][j];
 
-			for (auto *geom : tiles[i][j]->physicsGeometry)
+			// iterate every head in the physicsGeometry vector, and then traverse its linked list (pNext)
+			for (Physics *headGeom : tile->physicsGeometry)
 			{
-				int type = geom->geometryType;
-				// BOX edges
-				if (type == PHYSICS_GEOM_TYPE_BOX)
+				for (Physics *geom = headGeom; geom; geom = geom->pNext)
 				{
-					VEC3 &h = geom->halfSize;
-					VEC3 v[8] = {/* same 8 vertices */};
-					for (auto &vv : v)
-						geom->model.transformVect(vv);
-					int E[12][2] = {
-						{0, 1}, {1, 2}, {2, 3}, {3, 0}, {4, 5}, {5, 6}, {6, 7}, {7, 4}, {0, 4}, {1, 5}, {2, 6}, {3, 7}};
-					for (auto &e : E)
+					int type = geom->geometryType;
+					// BOX edges
+					if (type == PHYSICS_GEOM_TYPE_BOX)
 					{
-						tile->physicsVertices.insert(tile->physicsVertices.end(), {v[e[0]].X, v[e[0]].Y, v[e[0]].Z,
-																				   v[e[1]].X, v[e[1]].Y, v[e[1]].Z});
+						VEC3 &h = geom->halfSize;
+						VEC3 v[8] = {
+							{-h.X, +h.Y, -h.Z}, {+h.X, +h.Y, -h.Z}, {+h.X, -h.Y, -h.Z}, {-h.X, -h.Y, -h.Z}, {-h.X, +h.Y, +h.Z}, {+h.X, +h.Y, +h.Z}, {+h.X, -h.Y, +h.Z}, {-h.X, -h.Y, +h.Z}};
+						for (auto &vv : v)
+							geom->model.transformVect(vv);
+						int E[12][2] = {
+							{0, 1}, {1, 2}, {2, 3}, {3, 0}, {4, 5}, {5, 6}, {6, 7}, {7, 4}, {0, 4}, {1, 5}, {2, 6}, {3, 7}};
+						for (auto &e : E)
+						{
+							tile->physicsVertices.insert(tile->physicsVertices.end(), {v[e[0]].X, v[e[0]].Y, v[e[0]].Z,
+																					   v[e[1]].X, v[e[1]].Y, v[e[1]].Z});
+						}
 					}
-				}
-				// CYLINDER edges
-				else if (type == PHYSICS_GEOM_TYPE_CYLINDER)
-				{
-					const int CUT_NUM = 16;
-					const float pi = 3.14159265359f;
-					float angle_step = 2.0f * pi / CUT_NUM;
-					float radius = geom->halfSize.X;
-					float height = geom->halfSize.Y;
-
-					int myoffset = 0.5 * radius;
-
-					// Local center points
-					VEC3 centerBottom(myoffset, -height, -myoffset);
-					VEC3 centerTop(myoffset, height, -myoffset);
-					geom->model.transformVect(centerBottom);
-					geom->model.transformVect(centerTop);
-
-					for (int s = 0; s < CUT_NUM; s++)
+					// CYLINDER edges
+					else if (type == PHYSICS_GEOM_TYPE_CYLINDER)
 					{
-						float angle0 = s * angle_step;
-						float angle1 = (s + 1) * angle_step;
+						const int CUT_NUM = 16;
+						const float pi = 3.14159265359f;
+						float angle_step = 2.0f * pi / CUT_NUM;
+						float radius = geom->halfSize.X;
+						float height = geom->halfSize.Y;
 
-						float x0 = radius * cosf(angle0) + myoffset, z0 = radius * sinf(angle0) - myoffset;
-						float x1 = radius * cosf(angle1) + myoffset, z1 = radius * sinf(angle1) - myoffset;
+						int myoffset = 0.5 * radius;
 
-						VEC3 b0(x0, -height, z0);
-						VEC3 t0(x0, height, z0);
-						VEC3 b1(x1, -height, z1);
-						VEC3 t1(x1, height, z1);
+						// Local center points
+						VEC3 centerBottom(myoffset, -height, -myoffset);
+						VEC3 centerTop(myoffset, height, -myoffset);
+						geom->model.transformVect(centerBottom);
+						geom->model.transformVect(centerTop);
 
-						geom->model.transformVect(b0);
-						geom->model.transformVect(t0);
-						geom->model.transformVect(b1);
-						geom->model.transformVect(t1);
+						for (int s = 0; s < CUT_NUM; s++)
+						{
+							float angle0 = s * angle_step;
+							float angle1 = (s + 1) * angle_step;
 
-						// --- Bottom Cap (CCW from below)
-						tile->physicsVertices.insert(tile->physicsVertices.end(), {b1.X, b1.Y, b1.Z,
-																				   b0.X, b0.Y, b0.Z,
-																				   centerBottom.X, centerBottom.Y, centerBottom.Z});
+							float x0 = radius * cosf(angle0) + myoffset, z0 = radius * sinf(angle0) - myoffset;
+							float x1 = radius * cosf(angle1) + myoffset, z1 = radius * sinf(angle1) - myoffset;
 
-						tile->physicsVertices.insert(tile->physicsVertices.end(), {b0.X, b0.Y, b0.Z,
-																				   t1.X, t1.Y, t1.Z,
-																				   b1.X, b1.Y, b1.Z});
+							VEC3 b0(x0, -height, z0);
+							VEC3 t0(x0, height, z0);
+							VEC3 b1(x1, -height, z1);
+							VEC3 t1(x1, height, z1);
 
-						// --- Side Face
-						tile->physicsVertices.insert(tile->physicsVertices.end(), {b0.X, b0.Y, b0.Z,
-																				   t0.X, t0.Y, t0.Z,
-																				   t1.X, t1.Y, t1.Z});
+							geom->model.transformVect(b0);
+							geom->model.transformVect(t0);
+							geom->model.transformVect(b1);
+							geom->model.transformVect(t1);
 
-						// --- Top Cap (CCW from above)
-						tile->physicsVertices.insert(tile->physicsVertices.end(), {t0.X, t0.Y, t0.Z,
-																				   t1.X, t1.Y, t1.Z,
-																				   centerTop.X, centerTop.Y, centerTop.Z});
+							// --- Bottom Cap (CCW from below)
+							tile->physicsVertices.insert(tile->physicsVertices.end(), {b1.X, b1.Y, b1.Z,
+																					   b0.X, b0.Y, b0.Z,
+																					   centerBottom.X, centerBottom.Y, centerBottom.Z});
+
+							tile->physicsVertices.insert(tile->physicsVertices.end(), {b0.X, b0.Y, b0.Z,
+																					   t1.X, t1.Y, t1.Z,
+																					   b1.X, b1.Y, b1.Z});
+
+							// --- Side Face
+							tile->physicsVertices.insert(tile->physicsVertices.end(), {b0.X, b0.Y, b0.Z,
+																					   t0.X, t0.Y, t0.Z,
+																					   t1.X, t1.Y, t1.Z});
+
+							// --- Top Cap (CCW from above)
+							tile->physicsVertices.insert(tile->physicsVertices.end(), {t0.X, t0.Y, t0.Z,
+																					   t1.X, t1.Y, t1.Z,
+																					   centerTop.X, centerTop.Y, centerTop.Z});
+						}
 					}
-				}
-				// MESH edges
-				else if (type == PHYSICS_GEOM_TYPE_MESH)
-				{
-					const auto *facePtr = !geom->indices.empty() ? &geom->indices
-																 : (geom->mesh ? &geom->mesh->second : nullptr);
-					const auto *vertPtr = !geom->vertices.empty() ? &geom->vertices
-																  : (geom->mesh ? &geom->mesh->first : nullptr);
-
-					if (!facePtr || !vertPtr || facePtr->empty() || vertPtr->empty())
-						continue;
-
-					const float RENDER_H_OFF = 0.10f;
-					int F = static_cast<int>(facePtr->size() / PHYSICS_FACE_SIZE);
-					const auto &face = *facePtr;
-					const auto &vert = *vertPtr;
-
-					for (int f = 0; f < F; ++f)
+					// MESH edges
+					else if (type == PHYSICS_GEOM_TYPE_MESH)
 					{
-						int a = face[4 * f];
-						int b = face[4 * f + 1];
-						int c = face[4 * f + 2];
+						const auto *facePtr = geom->mesh ? &geom->mesh->second : nullptr;
+						const auto *vertPtr = geom->mesh ? &geom->mesh->first : nullptr;
 
-						if ((3 * a + 2) >= (int)vert.size() || (3 * b + 2) >= (int)vert.size() || (3 * c + 2) >= (int)vert.size())
+						if (!facePtr || !vertPtr || facePtr->empty() || vertPtr->empty())
 							continue;
 
-						VEC3 v0(vert[3 * a], vert[3 * a + 1] + RENDER_H_OFF, -vert[3 * a + 2]);
-						VEC3 v1(vert[3 * b], vert[3 * b + 1] + RENDER_H_OFF, -vert[3 * b + 2]);
-						VEC3 v2(vert[3 * c], vert[3 * c + 1] + RENDER_H_OFF, -vert[3 * c + 2]);
+						const float RENDER_H_OFF = 0.10f;
+						int F = static_cast<int>(facePtr->size() / PHYSICS_FACE_SIZE);
+						const auto &face = *facePtr;
+						const auto &vert = *vertPtr;
 
-						geom->model.transformVect(v0);
-						geom->model.transformVect(v1);
-						geom->model.transformVect(v2);
+						for (int f = 0; f < F; ++f)
+						{
+							int a = face[4 * f];
+							int b = face[4 * f + 1];
+							int c = face[4 * f + 2];
 
-						// Fix winding after mirroring: write triangles (v0,v2,v2), (v2,v1,v1), (v1,v0,v0) ?
-						// (your previous code produced a 4-triangle strip — keep original mapping below)
-						tile->physicsVertices.insert(tile->physicsVertices.end(), {v0.X, v0.Y, v0.Z, v2.X, v2.Y, v2.Z,
-																				   v2.X, v2.Y, v2.Z, v1.X, v1.Y, v1.Z,
-																				   v1.X, v1.Y, v1.Z, v0.X, v0.Y, v0.Z});
+							if ((3 * a + 2) >= (int)vert.size() || (3 * b + 2) >= (int)vert.size() || (3 * c + 2) >= (int)vert.size())
+								continue;
+
+							VEC3 v0(vert[3 * a], vert[3 * a + 1] + RENDER_H_OFF, -vert[3 * a + 2]);
+							VEC3 v1(vert[3 * b], vert[3 * b + 1] + RENDER_H_OFF, -vert[3 * b + 2]);
+							VEC3 v2(vert[3 * c], vert[3 * c + 1] + RENDER_H_OFF, -vert[3 * c + 2]);
+
+							geom->model.transformVect(v0);
+							geom->model.transformVect(v1);
+							geom->model.transformVect(v2);
+
+							// Fix winding after mirroring: write triangles (v0,v2,v2), (v2,v1,v1), (v1,v0,v0) ?
+							// (your previous code produced a 4-triangle strip — keep original mapping below)
+							tile->physicsVertices.insert(tile->physicsVertices.end(), {v0.X, v0.Y, v0.Z, v2.X, v2.Y, v2.Z,
+																					   v2.X, v2.Y, v2.Z, v1.X, v1.Y, v1.Z,
+																					   v1.X, v1.Y, v1.Z, v0.X, v0.Y, v0.Z});
+						}
 					}
-				}
-			}
+				} // end traverse linked list
+			} // end iterate heads
 
 			for (Physics *p : tile->physicsGeometry)
 				delete p;

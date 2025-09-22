@@ -13,7 +13,7 @@
 #define PHYSICS_GEOM_TYPE_INFINITE_PLANE 8
 
 // 36 bytes
-struct PHYGeometry
+struct GeometryInfo
 {
 	int type;
 	int flags;
@@ -26,7 +26,7 @@ struct PHYGeometry
 	float halfSizeZ;
 };
 
-// terrain's global cache for .phy models (key — filename, value — shared pointer)
+// terrain's global cache for .phy models vertex data (key — filename, value — shared pointer)
 inline std::unordered_map<std::string, std::shared_ptr<std::pair<std::vector<float>, std::vector<unsigned short>>>> physicsModelCache;
 
 // Class for loading physics geometry.
@@ -35,10 +35,7 @@ inline std::unordered_map<std::string, std::shared_ptr<std::pair<std::vector<flo
 class Physics
 {
   public:
-	// values for rendering physics mesh geometry type
-	std::vector<float> vertices;
-	std::vector<unsigned short> indices;
-	std::shared_ptr<std::pair<std::vector<float>, std::vector<unsigned short>>> mesh; // .phy mesh shared pointer to pair vertices + indices
+	std::shared_ptr<std::pair<std::vector<float>, std::vector<unsigned short>>> mesh; // .phy mesh shared pointer to store pair vertices + indices vectors (this data will be share pointer with cache)
 
 	// values read from .phy file
 	int geometryType;
@@ -96,40 +93,40 @@ class Physics
 			int type;
 			memcpy(&type, buffer + offset, sizeof(int));
 
-			if (tmpName == "model/scene/build/orc/orcother_woodybridge.phy")
-			{
-				std::cout << "type " << type << std::endl;
-			}
-
 			Physics *node = NULL; // current submesh
 
-			if (type == PHYSICS_GEOM_TYPE_MESH) // physics mesh: search in cache; if not found, save local position, dimensions and vertex data
+			if (type == PHYSICS_GEOM_TYPE_MESH) // physics mesh: search in cache; if not found, save local position and dimensions in tile's storage and vertex data in cache
 			{
-				auto it = physicsModelCache.find(fname);
+				// (not using PHYGeometry struct because layout for physics mesh info is 32 bytes)
+				VEC3 pos(0.0f, 0.0f, 0.0f);
+				float hx, hy, hz;
+
+				memcpy(&pos.X, buffer + offset + 8, sizeof(float));
+				memcpy(&pos.Z, buffer + offset + 12, sizeof(float));
+				memcpy(&pos.Y, buffer + offset + 16, sizeof(float));
+				memcpy(&hx, buffer + offset + 20, sizeof(float));
+				memcpy(&hz, buffer + offset + 24, sizeof(float));
+				memcpy(&hy, buffer + offset + 28, sizeof(float));
+
+				short vertexCount, faceCount;
+				memcpy(&vertexCount, buffer + offset + 32, sizeof(short));
+				memcpy(&faceCount, buffer + offset + 34, sizeof(short));
+
+				offset += 36;
+
+				std::string cacheKey = std::string(fname) + "#" + std::to_string(i); // (using just file name as a key for unsorted map does not work because all physics meshes of the same .phy file would share one key)
+				auto it = physicsModelCache.find(cacheKey);
 
 				if (it != physicsModelCache.end()) // reuse cached model
 				{
-					std::cout << "reusing cached " << tmpName << std::endl;
+					offset += vertexCount * 3 * sizeof(float);
+					offset += faceCount * PHYSICS_FACE_SIZE * sizeof(short);
+
+					node = new Physics(pos, hx, hy, hz, PHYSICS_GEOM_TYPE_MESH);
 					node->mesh = it->second;
 				}
 				else // not cached — build vertex data and insert to cache on success
 				{
-					// (not using PHYGeometry struct because layout for physics mesh info is 32 bytes)
-					VEC3 pos(0.0f, 0.0f, 0.0f);
-					float hx, hy, hz;
-					memcpy(&pos.X, buffer + offset + 8, sizeof(float));
-					memcpy(&pos.Z, buffer + offset + 12, sizeof(float));
-					memcpy(&pos.Y, buffer + offset + 16, sizeof(float));
-					memcpy(&hx, buffer + offset + 20, sizeof(float));
-					memcpy(&hz, buffer + offset + 24, sizeof(float));
-					memcpy(&hy, buffer + offset + 28, sizeof(float));
-
-					short vertexCount, faceCount;
-					memcpy(&vertexCount, buffer + offset + 32, sizeof(short));
-					memcpy(&faceCount, buffer + offset + 34, sizeof(short));
-
-					offset += 36;
-
 					std::vector<float> vertices;
 					vertices.reserve(vertexCount * 3);
 
@@ -156,40 +153,26 @@ class Physics
 						indices.push_back(v);
 					}
 
-					node = new Physics(pos, hx, hy, hz, PHYSICS_GEOM_TYPE_MESH);
+					node = new Physics(pos, hx, hy, hz, PHYSICS_GEOM_TYPE_MESH); // create new physics mesh object
 
-					// wrap buffers in shared_ptr-based pair (move vectors, no extra copy)
-					node->mesh = std::make_shared<std::pair<std::vector<float>, std::vector<unsigned short>>>(std::move(vertices), std::move(indices));
+					node->mesh = std::make_shared<std::pair<std::vector<float>, std::vector<unsigned short>>>(std::move(vertices), std::move(indices)); // init shared pointer for vertex data (we share only vertices and indices, but not Physics objects! move vectors, no extra copy)
 
-					if (tmpName == "model/scene/build/orc/orcother_woodybridge.phy")
-					{
-						std::cout << "loading " << tmpName << " vertices " << vertexCount << " faces " << faceCount << std::endl;
-						std::cout << "[" << i + 1 << "] geom type " << type << " offset " << offset << " translation (" << pos.X << ", " << pos.Y << ", " << pos.Z << ")" << std::endl;
-					}
-
-					// offset -= 4;
-
-					// if (node->mesh)
-					// 	physicsModelCache[fname] = node->mesh; // add to global cache with filename as a key for quick lookup
-					// else
-					// 	std::cout << "[Debug] Physics::load: failed to load " << fname << std::endl;
+					if (node->mesh)
+						physicsModelCache[cacheKey] = node->mesh; // add to global cache with filename as a key for quick lookup
+					else
+						std::cout << "[Debug] Physics::load: failed to load " << fname << std::endl;
 				}
 			}
 			else // non-mesh primitive: only save local position and dimensions (these values are enough to build vertex data later)
 			{
-				PHYGeometry geom;
-				memcpy(&geom, buffer + offset, sizeof(PHYGeometry));
+				GeometryInfo geom;
+				memcpy(&geom, buffer + offset, sizeof(GeometryInfo));
 				VEC3 pos(geom.transX, geom.transY, geom.transZ);
 				float hx = geom.halfSizeX;
 				float hy = geom.halfSizeY;
 				float hz = geom.halfSizeZ;
 
-				offset += sizeof(PHYGeometry);
-
-				if (tmpName == "model/scene/build/orc/orcother_woodybridge.phy")
-				{
-					std::cout << "[" << i + 1 << "] geom type " << type << " offset " << offset << "translation (" << geom.transX << ", " << geom.transY << ", " << geom.transZ << ")" << std::endl;
-				}
+				offset += sizeof(GeometryInfo);
 
 				switch (type)
 				{
