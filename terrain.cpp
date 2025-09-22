@@ -741,16 +741,16 @@ void Terrain::getPhysicsVertices()
 
 			for (Physics *geom : tile->physicsGeometry)
 			{
-				int type = geom->m_geomType;
+				int type = geom->geometryType;
 
 				// --- BOX: emit 12 tris (6 faces × 2) ---
 				if (type == PHYSICS_GEOM_TYPE_BOX)
 				{
-					VEC3 &h = geom->m_halfSize;
+					VEC3 &h = geom->halfSize;
 					VEC3 v[8] = {
 						{-h.X, +h.Y, -h.Z}, {+h.X, +h.Y, -h.Z}, {+h.X, -h.Y, -h.Z}, {-h.X, -h.Y, -h.Z}, {-h.X, +h.Y, +h.Z}, {+h.X, +h.Y, +h.Z}, {+h.X, -h.Y, +h.Z}, {-h.X, -h.Y, +h.Z}};
 					for (auto &vv : v)
-						geom->m_absTransform.transformVect(vv);
+						geom->model.transformVect(vv);
 					// correct faces: front, back, left, right, top, bottom
 					int F[6][4] = {
 						{0, 1, 2, 3}, {5, 4, 7, 6}, {0, 3, 7, 4}, {1, 5, 6, 2}, {0, 4, 5, 1}, {3, 2, 6, 7}};
@@ -768,16 +768,16 @@ void Terrain::getPhysicsVertices()
 					const int CUT_NUM = 16;
 					const float pi = 3.14159265359f;
 					float angle_step = 2.0f * pi / CUT_NUM;
-					float radius = geom->m_halfSize.X;
-					float height = geom->m_halfSize.Y;
+					float radius = geom->halfSize.X;
+					float height = geom->halfSize.Y;
 
 					int myoffset = 0.5 * radius;
 
 					// Local center points
 					VEC3 centerBottom(myoffset, -height, -myoffset);
 					VEC3 centerTop(myoffset, height, -myoffset);
-					geom->m_absTransform.transformVect(centerBottom);
-					geom->m_absTransform.transformVect(centerTop);
+					geom->model.transformVect(centerBottom);
+					geom->model.transformVect(centerTop);
 
 					for (int s = 0; s < CUT_NUM; s++)
 					{
@@ -794,10 +794,10 @@ void Terrain::getPhysicsVertices()
 						VEC3 t1(x1, +height, z1);
 
 						// Transform to world
-						geom->m_absTransform.transformVect(b0);
-						geom->m_absTransform.transformVect(b1);
-						geom->m_absTransform.transformVect(t0);
-						geom->m_absTransform.transformVect(t1);
+						geom->model.transformVect(b0);
+						geom->model.transformVect(b1);
+						geom->model.transformVect(t0);
+						geom->model.transformVect(t1);
 
 						// --- Bottom Cap (CCW when viewed from below)
 						tile->physicsVertices.insert(tile->physicsVertices.end(), {b1.X, b1.Y, b1.Z,
@@ -823,31 +823,40 @@ void Terrain::getPhysicsVertices()
 				// --- MESH: emit each face as one triangle ---
 				else if (type == PHYSICS_GEOM_TYPE_MESH)
 				{
-					auto *m = geom->m_refMesh;
-					if (!m)
+					// try local vectors first, fallback на cached buffers
+					const auto *facePtr = !geom->indices.empty() ? &geom->indices
+																 : (geom->mesh ? &geom->mesh->second : nullptr);
+					const auto *vertPtr = !geom->vertices.empty() ? &geom->vertices
+																  : (geom->mesh ? &geom->mesh->first : nullptr);
+
+					if (!facePtr || !vertPtr || facePtr->empty() || vertPtr->empty())
 						continue;
 
 					const float RENDER_H_OFF = 0.10f;
-					int F = m->GetNbFace();
-					auto face = m->GetFacePointer();
-					auto vert = m->GetVertexPointer();
+					int F = static_cast<int>(facePtr->size() / PHYSICS_FACE_SIZE);
+					const auto &face = *facePtr;
+					const auto &vert = *vertPtr;
 
+					// safety: check bounds optionally
 					for (int f = 0; f < F; ++f)
 					{
 						int a = face[4 * f];
 						int b = face[4 * f + 1];
 						int c = face[4 * f + 2];
 
-						// Mirror Z BEFORE transformation
+						// guard against bad indices
+						if ((3 * a + 2) >= (int)vert.size() || (3 * b + 2) >= (int)vert.size() || (3 * c + 2) >= (int)vert.size())
+							continue;
+
 						VEC3 v0(vert[3 * a], vert[3 * a + 1] + RENDER_H_OFF, -vert[3 * a + 2]);
 						VEC3 v1(vert[3 * b], vert[3 * b + 1] + RENDER_H_OFF, -vert[3 * b + 2]);
 						VEC3 v2(vert[3 * c], vert[3 * c + 1] + RENDER_H_OFF, -vert[3 * c + 2]);
 
-						geom->m_absTransform.transformVect(v0);
-						geom->m_absTransform.transformVect(v1);
-						geom->m_absTransform.transformVect(v2);
+						geom->model.transformVect(v0);
+						geom->model.transformVect(v1);
+						geom->model.transformVect(v2);
 
-						// Fix winding: v0 → v2 → v1 instead of v0 → v1 → v2
+						// Fix winding after mirroring: v0 → v2 → v1
 						tile->physicsVertices.insert(tile->physicsVertices.end(), {v0.X, v0.Y, v0.Z,
 																				   v2.X, v2.Y, v2.Z,
 																				   v1.X, v1.Y, v1.Z});
@@ -870,14 +879,14 @@ void Terrain::getPhysicsVertices()
 
 			for (auto *geom : tiles[i][j]->physicsGeometry)
 			{
-				int type = geom->m_geomType;
+				int type = geom->geometryType;
 				// BOX edges
 				if (type == PHYSICS_GEOM_TYPE_BOX)
 				{
-					VEC3 &h = geom->m_halfSize;
+					VEC3 &h = geom->halfSize;
 					VEC3 v[8] = {/* same 8 vertices */};
 					for (auto &vv : v)
-						geom->m_absTransform.transformVect(vv);
+						geom->model.transformVect(vv);
 					int E[12][2] = {
 						{0, 1}, {1, 2}, {2, 3}, {3, 0}, {4, 5}, {5, 6}, {6, 7}, {7, 4}, {0, 4}, {1, 5}, {2, 6}, {3, 7}};
 					for (auto &e : E)
@@ -892,16 +901,16 @@ void Terrain::getPhysicsVertices()
 					const int CUT_NUM = 16;
 					const float pi = 3.14159265359f;
 					float angle_step = 2.0f * pi / CUT_NUM;
-					float radius = geom->m_halfSize.X;
-					float height = geom->m_halfSize.Y;
+					float radius = geom->halfSize.X;
+					float height = geom->halfSize.Y;
 
 					int myoffset = 0.5 * radius;
 
 					// Local center points
 					VEC3 centerBottom(myoffset, -height, -myoffset);
 					VEC3 centerTop(myoffset, height, -myoffset);
-					geom->m_absTransform.transformVect(centerBottom);
-					geom->m_absTransform.transformVect(centerTop);
+					geom->model.transformVect(centerBottom);
+					geom->model.transformVect(centerTop);
 
 					for (int s = 0; s < CUT_NUM; s++)
 					{
@@ -916,10 +925,10 @@ void Terrain::getPhysicsVertices()
 						VEC3 b1(x1, -height, z1);
 						VEC3 t1(x1, height, z1);
 
-						geom->m_absTransform.transformVect(b0);
-						geom->m_absTransform.transformVect(t0);
-						geom->m_absTransform.transformVect(b1);
-						geom->m_absTransform.transformVect(t1);
+						geom->model.transformVect(b0);
+						geom->model.transformVect(t0);
+						geom->model.transformVect(b1);
+						geom->model.transformVect(t1);
 
 						// --- Bottom Cap (CCW from below)
 						tile->physicsVertices.insert(tile->physicsVertices.end(), {b1.X, b1.Y, b1.Z,
@@ -944,14 +953,18 @@ void Terrain::getPhysicsVertices()
 				// MESH edges
 				else if (type == PHYSICS_GEOM_TYPE_MESH)
 				{
-					auto *m = geom->m_refMesh;
-					if (!m)
+					const auto *facePtr = !geom->indices.empty() ? &geom->indices
+																 : (geom->mesh ? &geom->mesh->second : nullptr);
+					const auto *vertPtr = !geom->vertices.empty() ? &geom->vertices
+																  : (geom->mesh ? &geom->mesh->first : nullptr);
+
+					if (!facePtr || !vertPtr || facePtr->empty() || vertPtr->empty())
 						continue;
 
 					const float RENDER_H_OFF = 0.10f;
-					int F = m->GetNbFace();
-					auto face = m->GetFacePointer();
-					auto vert = m->GetVertexPointer();
+					int F = static_cast<int>(facePtr->size() / PHYSICS_FACE_SIZE);
+					const auto &face = *facePtr;
+					const auto &vert = *vertPtr;
 
 					for (int f = 0; f < F; ++f)
 					{
@@ -959,17 +972,19 @@ void Terrain::getPhysicsVertices()
 						int b = face[4 * f + 1];
 						int c = face[4 * f + 2];
 
-						// Mirror Z by negating Z value
+						if ((3 * a + 2) >= (int)vert.size() || (3 * b + 2) >= (int)vert.size() || (3 * c + 2) >= (int)vert.size())
+							continue;
+
 						VEC3 v0(vert[3 * a], vert[3 * a + 1] + RENDER_H_OFF, -vert[3 * a + 2]);
 						VEC3 v1(vert[3 * b], vert[3 * b + 1] + RENDER_H_OFF, -vert[3 * b + 2]);
 						VEC3 v2(vert[3 * c], vert[3 * c + 1] + RENDER_H_OFF, -vert[3 * c + 2]);
 
-						// Apply transform
-						geom->m_absTransform.transformVect(v0);
-						geom->m_absTransform.transformVect(v1);
-						geom->m_absTransform.transformVect(v2);
+						geom->model.transformVect(v0);
+						geom->model.transformVect(v1);
+						geom->model.transformVect(v2);
 
-						// Fix winding after mirroring: v0 → v2 → v1
+						// Fix winding after mirroring: write triangles (v0,v2,v2), (v2,v1,v1), (v1,v0,v0) ?
+						// (your previous code produced a 4-triangle strip — keep original mapping below)
 						tile->physicsVertices.insert(tile->physicsVertices.end(), {v0.X, v0.Y, v0.Z, v2.X, v2.Y, v2.Z,
 																				   v2.X, v2.Y, v2.Z, v1.X, v1.Y, v1.Z,
 																				   v1.X, v1.Y, v1.Z, v0.X, v0.Y, v0.Z});
@@ -1004,10 +1019,8 @@ void Terrain::reset()
 	tilesVisible.clear();
 	sounds.clear();
 
-	for (auto &[name, mesh] : g_phyMeshCache)
-		delete mesh;
-
-	g_phyMeshCache.clear();
+	bdaeModelCache.clear();
+	physicsModelCache.clear();
 }
 
 // Replace the whole function in your file with this version.
@@ -1242,28 +1255,27 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool rende
 		}
 	}
 
-	/* 	// render physics
-		for (TileTerrain *tile : tilesVisible)
-		{
-			if (!tile)
-				continue;
+	// render physics
+	for (TileTerrain *tile : tilesVisible)
+	{
+		if (!tile)
+			continue;
 
-			if (tile->phyVAO == 0 || tile->phyVBO == 0)
-				continue;
+		if (tile->phyVAO == 0 || tile->phyVBO == 0)
+			continue;
 
-			glBindVertexArray(tile->phyVAO);
+		glBindVertexArray(tile->phyVAO);
 
-			shader.setInt("renderMode", 4);
-			glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-			glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
+		shader.setInt("renderMode", 4);
+		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+		glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
 
-			shader.setInt("renderMode", 2);
-			glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-			glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
+		shader.setInt("renderMode", 2);
+		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+		glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
 
-			glBindVertexArray(0);
-		}
-	*/
+		glBindVertexArray(0);
+	}
 
 	// render water and 3D models
 	for (TileTerrain *tile : tilesVisible)
@@ -1273,18 +1285,18 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool rende
 
 		tile->water.draw(view, projection, light.showLighting, simple, dt, camera.Position);
 
-		for (auto &mi : tile->models)
-		{
-			const std::shared_ptr<Model> &m = mi.first;
-			const glm::mat4 &instModel = mi.second;
+		// for (auto &mi : tile->models)
+		// {
+		// 	const std::shared_ptr<Model> &m = mi.first;
+		// 	const glm::mat4 &instModel = mi.second;
 
-			if (!m)
-				continue;
-			if (!m->modelLoaded)
-				continue;
+		// 	if (!m)
+		// 		continue;
+		// 	if (!m->modelLoaded)
+		// 		continue;
 
-			m->draw(instModel, view, projection, camera.Position, light.showLighting, simple);
-		}
+		// 	m->draw(instModel, view, projection, camera.Position, light.showLighting, simple);
+		// }
 	}
 
 	// render skybox

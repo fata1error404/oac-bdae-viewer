@@ -12,58 +12,9 @@
 #define PHYSICS_GEOM_TYPE_MESH 7
 #define PHYSICS_GEOM_TYPE_INFINITE_PLANE 8
 
-// class Terrain;
-
-class PhysicsRefMesh
+// 36 bytes
+struct PHYGeometry
 {
-  public:
-	PhysicsRefMesh(int nVertex, float *fVertex, int nFaces, unsigned short *facePtr)
-		: ReferenceCounter(1), m_vertex(fVertex), m_nbVertex(nVertex), m_nbFaces(nFaces), m_faces(facePtr) {}
-
-	~PhysicsRefMesh()
-	{
-		delete[] m_vertex;
-		delete[] m_faces;
-	}
-
-	void grab() const
-	{
-		++ReferenceCounter;
-	}
-
-	bool drop() const
-	{
-		--ReferenceCounter;
-
-		if (!ReferenceCounter)
-		{
-			delete this;
-			return true;
-		}
-
-		return false;
-	}
-
-	int getReferenceCount() const { return ReferenceCounter; }
-
-	int GetNbVertex() const { return m_nbVertex; }
-
-	int GetNbFace() const { return m_nbFaces; }
-
-	const float *GetVertexPointer() const { return m_vertex; }
-
-	const unsigned short *GetFacePointer() const { return m_faces; }
-
-	mutable int ReferenceCounter;
-	float *m_vertex;
-	int m_nbVertex;
-	int m_nbFaces;
-	unsigned short *m_faces;
-};
-
-struct PHYFileHeader
-{
-	int meshCount;
 	int type;
 	int flags;
 	float rotY;
@@ -75,187 +26,198 @@ struct PHYFileHeader
 	float halfSizeZ;
 };
 
-// global (transwlation unit) cache for phy meshes
-inline std::unordered_map<std::string, PhysicsRefMesh *> g_phyMeshCache;
+// terrain's global cache for .phy models (key — filename, value — shared pointer)
+inline std::unordered_map<std::string, std::shared_ptr<std::pair<std::vector<float>, std::vector<unsigned short>>>> physicsModelCache;
 
-// Abstract class for the Geometry of physics.
-// ___________________________________________
+// Class for loading physics geometry.
+// ___________________________________
 
 class Physics
 {
   public:
-	VEC3 m_pos;
-	VEC3 m_halfSize;
+	// values for rendering physics mesh geometry type
+	std::vector<float> vertices;
+	std::vector<unsigned short> indices;
+	std::shared_ptr<std::pair<std::vector<float>, std::vector<unsigned short>>> mesh; // .phy mesh shared pointer to pair vertices + indices
 
-	float m_rotY;
-	int m_geomType;
+	// values read from .phy file
+	int geometryType;
+	VEC3 position; // local translation
+	VEC3 halfSize; // local 0.5 width, height and length
 
-	AABB m_AABB;
-	AABB m_groupAABB;
-	Physics *m_pNext;
-	Physics *m_pTrigger; // (?)
+	MTX4 model; // model matrix that combines local space translation from .phy file and world space transformation from .itm file
 
-	MTX4 m_absTransform;
-	MTX4 m_invAbsTransform;
-	VEC3 m_absScale;
-	VEC3 m_invAbsScale;
+	Physics *pNext; // pointer to next submesh within a single physics model
 
-	PhysicsRefMesh *m_refMesh;
-
-	union
-	{
-		int s32value;
-		struct
-		{
-			int house_inner_type : 8; // indicate entity_house flag
-			int mtl_type : 8;
-			int entityIndex : 14;
-			int parentTransformSet : 1;
-			int _pad1 : 1;
-		};
-
-	} m_info;
-
-	Physics() : m_rotY(0), m_pNext(NULL), m_pTrigger(NULL) {};
-
-	Physics(const VEC3 &pos, float rotY, float halfW, float halfH, float halfL, int type)
-		: m_pos(pos),
-		  m_rotY(rotY),
-		  m_halfSize(halfW, halfH, halfL),
-		  m_geomType(type),
-		  m_pNext(NULL),
-		  m_pTrigger(NULL),
-		  m_refMesh(NULL) {};
+	Physics(VEC3 pos, float halfW, float halfH, float halfL, int type)
+		: position(pos),
+		  halfSize(halfW, halfH, halfL),
+		  geometryType(type),
+		  pNext(NULL) {}
 
 	~Physics()
 	{
-		if (m_refMesh)
-		{
-			m_refMesh->drop();
-		}
-
-		if (m_pNext)
-			delete m_pNext;
-
-		if (m_pTrigger)
-			delete m_pNext;
+		if (pNext)
+			delete pNext;
 	}
 
-	void loadMeshUsingRef(unsigned char *buffer, PhysicsRefMesh *cached)
+	//! Processes a single .phy file, handling multiple submeshes, different geometry types and saving all data required for rendering.
+	static Physics *load(CZipResReader *archive, const char *fname)
 	{
-		// почти как loadMesh, но НЕ выделяем/копируем vertex/faces arrays;
-		// а только заполняем остальные поля, и присваиваем m_refMesh = cached (и grab уже сделан вне)
-		PHYFileHeader *header = (PHYFileHeader *)buffer;
-
-		int offset = 8;
-		m_geomType = 7;
-
-		memcpy(&m_info.s32value, buffer + offset, sizeof(int));
-		memcpy(&m_pos.X, buffer + offset + 4, sizeof(float));
-		memcpy(&m_pos.Z, buffer + offset + 4 + sizeof(float), sizeof(float));
-		memcpy(&m_pos.Y, buffer + offset + 4 + 2 * sizeof(float), sizeof(float));
-		memcpy(&m_halfSize.X, buffer + offset + 4 + 3 * sizeof(float), sizeof(float));
-		memcpy(&m_halfSize.Z, buffer + offset + 4 + 4 * sizeof(float), sizeof(float));
-		memcpy(&m_halfSize.Y, buffer + 4 + offset + 5 * sizeof(float), sizeof(float));
-
-		// Read mesh header (we only need nv / nbFaces for some bookkeeping)
-		short nv = 0, nbFaces = 0;
-		memcpy(&nv, buffer + offset + 4 + 6 * sizeof(float), sizeof(short));
-		memcpy(&nbFaces, buffer + offset + 4 + 6 * sizeof(float) + sizeof(short), sizeof(short));
-
-		// assign cached refmesh
-		m_refMesh = cached;
-		// Note: cached->grab() must be called by caller before/after this call.
-	}
-
-	//!
-	static Physics *load(CZipResReader *archive, const char *fname, bool isEntityHouse)
-	{
-		std::string tmpName = std::string(fname).replace(std::strlen(fname) - 5, 5, ".phy");
+		std::string tmpName = std::string(fname);
+		if (tmpName.size() >= 5)
+			tmpName.replace(tmpName.size() - 5, 5, ".phy");
 
 		IReadResFile *phyFile = archive->openFile(tmpName.c_str());
 
 		if (!phyFile)
-			return nullptr;
+			return NULL;
 
 		phyFile->seek(0);
-		int fileSize = static_cast<int>(phyFile->getSize());
+		int fileSize = (int)phyFile->getSize();
 		unsigned char *buffer = new unsigned char[fileSize];
 		phyFile->read(buffer, fileSize);
 		phyFile->drop();
 
-		int nbMesh;
-		std::memcpy(&nbMesh, buffer, sizeof(int));
+		int submeshCount;
+		memcpy(&submeshCount, buffer, sizeof(int));
 
-		Physics *head = nullptr;
-		Physics *tail = nullptr;
+		// head (first submesh = node) o ⭢ o ... o ⭢ o ⭢ o tail
+		// physics model may consist of several submeshes, so we use linked list to have a chain of submeshes (gives O(1) for append operation and when deleting head node it frees the whole linked structure without leaks)
 
-		for (int i = 0; i < nbMesh; ++i)
+		Physics *head = NULL;
+		Physics *tail = NULL;
+
+		int offset = 4;
+
+		// loop through each submesh
+		for (int i = 0; i < submeshCount; i++)
 		{
 			int type;
-			std::memcpy(&type, buffer + 4, sizeof(int));
-			Physics *node = nullptr;
+			memcpy(&type, buffer + offset, sizeof(int));
 
-			if (type == PHYSICS_GEOM_TYPE_MESH)
+			if (tmpName == "model/scene/build/orc/orcother_woodybridge.phy")
 			{
-				// check cache
-				auto it = g_phyMeshCache.find(tmpName);
+				std::cout << "type " << type << std::endl;
+			}
 
-				if (it != g_phyMeshCache.end())
+			Physics *node = NULL; // current submesh
+
+			if (type == PHYSICS_GEOM_TYPE_MESH) // physics mesh: search in cache; if not found, save local position, dimensions and vertex data
+			{
+				auto it = physicsModelCache.find(fname);
+
+				if (it != physicsModelCache.end()) // reuse cached model
 				{
-					// use cached refmesh
-					node = new Physics();
-					// caller must ensure cached->grab() is called to increment refcount
-					it->second->grab();
-					node->loadMeshUsingRef(buffer, it->second);
+					std::cout << "reusing cached " << tmpName << std::endl;
+					node->mesh = it->second;
 				}
-				else
+				else // not cached — build vertex data and insert to cache on success
 				{
-					node = new Physics();
-					node->loadMesh(buffer); // this creates node->m_refMesh = new PhysicsRefMesh(...)
-					// store in cache and increase refcount for cache owner
-					if (node->m_refMesh)
+					// (not using PHYGeometry struct because layout for physics mesh info is 32 bytes)
+					VEC3 pos(0.0f, 0.0f, 0.0f);
+					float hx, hy, hz;
+					memcpy(&pos.X, buffer + offset + 8, sizeof(float));
+					memcpy(&pos.Z, buffer + offset + 12, sizeof(float));
+					memcpy(&pos.Y, buffer + offset + 16, sizeof(float));
+					memcpy(&hx, buffer + offset + 20, sizeof(float));
+					memcpy(&hz, buffer + offset + 24, sizeof(float));
+					memcpy(&hy, buffer + offset + 28, sizeof(float));
+
+					short vertexCount, faceCount;
+					memcpy(&vertexCount, buffer + offset + 32, sizeof(short));
+					memcpy(&faceCount, buffer + offset + 34, sizeof(short));
+
+					offset += 36;
+
+					std::vector<float> vertices;
+					vertices.reserve(vertexCount * 3);
+
+					for (int i = 0; i < vertexCount; i++)
 					{
-						node->m_refMesh->grab(); // now refcount: node (1) + cache (1) = 2
-						g_phyMeshCache[tmpName] = node->m_refMesh;
+						float vx, vy, vz;
+						memcpy(&vx, buffer + offset, sizeof(float));
+						memcpy(&vz, buffer + offset + 4, sizeof(float));
+						memcpy(&vy, buffer + offset + 8, sizeof(float));
+						offset += 3 * sizeof(float);
+						vertices.push_back(vx);
+						vertices.push_back(vy);
+						vertices.push_back(vz);
 					}
+
+					std::vector<unsigned short> indices;
+					indices.reserve(faceCount * PHYSICS_FACE_SIZE);
+
+					for (int i = 0, n = faceCount * PHYSICS_FACE_SIZE; i < n; i++)
+					{
+						unsigned short v;
+						memcpy(&v, buffer + offset, sizeof(unsigned short));
+						offset += sizeof(unsigned short);
+						indices.push_back(v);
+					}
+
+					node = new Physics(pos, hx, hy, hz, PHYSICS_GEOM_TYPE_MESH);
+
+					// wrap buffers in shared_ptr-based pair (move vectors, no extra copy)
+					node->mesh = std::make_shared<std::pair<std::vector<float>, std::vector<unsigned short>>>(std::move(vertices), std::move(indices));
+
+					if (tmpName == "model/scene/build/orc/orcother_woodybridge.phy")
+					{
+						std::cout << "loading " << tmpName << " vertices " << vertexCount << " faces " << faceCount << std::endl;
+						std::cout << "[" << i + 1 << "] geom type " << type << " offset " << offset << " translation (" << pos.X << ", " << pos.Y << ", " << pos.Z << ")" << std::endl;
+					}
+
+					// offset -= 4;
+
+					// if (node->mesh)
+					// 	physicsModelCache[fname] = node->mesh; // add to global cache with filename as a key for quick lookup
+					// else
+					// 	std::cout << "[Debug] Physics::load: failed to load " << fname << std::endl;
 				}
 			}
-			else
+			else // non-mesh primitive: only save local position and dimensions (these values are enough to build vertex data later)
 			{
-				PHYFileHeader header;
-				std::memcpy(&header, buffer, sizeof(PHYFileHeader));
-				VEC3 pos(header.transX, header.transY, header.transZ);
-				float ry = header.rotY;
-				float hx = header.halfSizeX;
-				float hy = header.halfSizeY;
-				float hz = header.halfSizeZ;
+				PHYGeometry geom;
+				memcpy(&geom, buffer + offset, sizeof(PHYGeometry));
+				VEC3 pos(geom.transX, geom.transY, geom.transZ);
+				float hx = geom.halfSizeX;
+				float hy = geom.halfSizeY;
+				float hz = geom.halfSizeZ;
+
+				offset += sizeof(PHYGeometry);
+
+				if (tmpName == "model/scene/build/orc/orcother_woodybridge.phy")
+				{
+					std::cout << "[" << i + 1 << "] geom type " << type << " offset " << offset << "translation (" << geom.transX << ", " << geom.transY << ", " << geom.transZ << ")" << std::endl;
+				}
 
 				switch (type)
 				{
 				case PHYSICS_GEOM_TYPE_PLANE:
-					node = new Physics(pos, ry, hx, hy, 0.0f, PHYSICS_GEOM_TYPE_PLANE);
+					node = new Physics(pos, hx, hy, 0.0f, PHYSICS_GEOM_TYPE_PLANE);
 					break;
 				case PHYSICS_GEOM_TYPE_BOX:
-					node = new Physics(pos, ry, hx, hy, hz, PHYSICS_GEOM_TYPE_BOX);
+					node = new Physics(pos, hx, hy, hz, PHYSICS_GEOM_TYPE_BOX);
 					break;
 				case PHYSICS_GEOM_TYPE_CYLINDER:
-					node = new Physics(pos, 0.0f, hx, hy, hz, PHYSICS_GEOM_TYPE_CYLINDER);
+					node = new Physics(pos, hx, hy, hz, PHYSICS_GEOM_TYPE_CYLINDER);
 					break;
 				default:
-					std::cout << "Unknown Physics geom type " << type << std::endl;
+					std::cout << "[Debug] Physics::load: unknown physics geometry type " << type << std::endl;
 					break;
 				}
 			}
 
+			// if unknown geometry type, go to next submesh
 			if (!node)
 				continue;
 
+			// append node to linked list
 			if (!head)
-				head = tail = node;
+				head = tail = node; // if this is first submesh in list, node becomes head and tail
 			else
 			{
-				tail->m_pNext = node;
+				tail->pNext = node; // otherwise, link node after tail and update tail pointer
 				tail = node;
 			}
 		}
@@ -264,128 +226,22 @@ class Physics
 		return head;
 	}
 
-	void loadMesh(unsigned char *buffer)
+	//! Builds local-to-world space transformation matrix for each physics model submesh (starting from head).
+	void buildModelMatrix(MTX4 worldTransform)
 	{
-		PHYFileHeader *header = (PHYFileHeader *)buffer;
+		Physics *node = this;
 
-		int offset = 8;
-		int size;
-		VEC3 pos;
-
-		m_geomType = 7;
-
-		memcpy(&m_info.s32value, buffer + offset, sizeof(int));
-		memcpy(&m_pos.X, buffer + offset + 4, sizeof(float));
-		memcpy(&m_pos.Z, buffer + offset + 4 + sizeof(float), sizeof(float));
-		memcpy(&m_pos.Y, buffer + offset + 4 + 2 * sizeof(float), sizeof(float));
-		memcpy(&m_halfSize.X, buffer + offset + 4 + 3 * sizeof(float), sizeof(float));
-		memcpy(&m_halfSize.Z, buffer + offset + 4 + 4 * sizeof(float), sizeof(float));
-		memcpy(&m_halfSize.Y, buffer + 4 + offset + 5 * sizeof(float), sizeof(float));
-
-		// Read mesh header
-		short nv, nbFaces;
-		memcpy(&nv, buffer + offset + 4 + 6 * sizeof(float), sizeof(short));
-		memcpy(&nbFaces, buffer + offset + 4 + 6 * sizeof(float) + sizeof(short), sizeof(short));
-
-		// Read mesh vertices
-		size = 3 * nv;
-		float *vertex = new float[size];
-
-		if (!vertex)
-			return;
-
-		offset += 4 + 6 * sizeof(float) + 2 * sizeof(short);
-
-		for (int i = 0; i < nv; i++)
+		// iterate through linked list
+		while (node)
 		{
-			memcpy(&vertex[i * 3], buffer + offset, sizeof(float));
-			offset += sizeof(float); // X
-			memcpy(&vertex[i * 3 + 2], buffer + offset, sizeof(float));
-			offset += sizeof(float);
-			memcpy(&vertex[i * 3 + 1], buffer + offset, sizeof(float));
-			offset += sizeof(float); // Y
+			// compute model matrix
+			node->model.makeIdentity();
+			node->model.setTranslation(node->position);
+			node->model = worldTransform * node->model;
+
+			// go to next submesh
+			node = node->pNext;
 		}
-
-		unsigned short *faces = NULL;
-
-		// Read mesh faces
-		size = nbFaces * PHYSICS_FACE_SIZE;
-		if (size > 0)
-		{
-			faces = new unsigned short[size];
-
-			if (!faces)
-			{
-				std::cout << "SHOULDN'T BE HERE" << std::endl;
-				delete[] vertex;
-				return;
-			}
-
-			for (int j = 0; j < size; ++j)
-			{
-				memcpy(&faces[j], buffer + offset, sizeof(short));
-				offset += sizeof(short);
-			}
-		}
-
-		m_refMesh = new PhysicsRefMesh(nv, vertex, nbFaces, faces);
-	}
-
-	//!
-	void SetSerilParentTransform(const MTX4 &transform)
-	{
-		Physics *pCur = this;
-
-		while (pCur)
-		{
-			pCur->SetParentTransform(transform);
-
-			if (pCur == this)
-				m_groupAABB = pCur->m_AABB;
-			else
-				m_groupAABB.addInternalBox(pCur->m_AABB);
-
-			pCur = pCur->m_pNext;
-		}
-
-		if (m_pTrigger)
-			m_pTrigger->SetSerilParentTransform(transform);
-	}
-
-	//!
-	void SetParentTransform(const MTX4 &transform)
-	{
-		m_info.parentTransformSet = 1;
-		m_absTransform.makeIdentity();
-		m_absTransform.setRotationDegrees(VEC3(0, m_rotY, 0));
-		m_absTransform.setTranslation(m_pos);
-		m_absTransform = transform * m_absTransform;
-
-		m_absTransform.getInverse(m_invAbsTransform);
-
-		UpdateAABB();
-	}
-
-	//!
-	void UpdateAABB()
-	{
-		m_AABB.MaxEdge.X = fabs(m_halfSize.X * m_absTransform[0]) +
-						   fabs(m_halfSize.Y * m_absTransform[4]) +
-						   fabs(m_halfSize.Z * m_absTransform[8]);
-		m_AABB.MinEdge.X = -m_AABB.MaxEdge.X + m_absTransform[12];
-		m_AABB.MaxEdge.X += m_absTransform[12];
-
-		m_AABB.MaxEdge.Y = fabs(m_halfSize.X * m_absTransform[1]) +
-						   fabs(m_halfSize.Y * m_absTransform[5]) +
-						   fabs(m_halfSize.Z * m_absTransform[9]);
-		m_AABB.MinEdge.Y = -m_AABB.MaxEdge.Y + m_absTransform[13];
-		m_AABB.MaxEdge.Y += m_absTransform[13];
-
-		m_AABB.MaxEdge.Z = fabs(m_halfSize.X * m_absTransform[2]) +
-						   fabs(m_halfSize.Y * m_absTransform[6]) +
-						   fabs(m_halfSize.Z * m_absTransform[10]);
-		m_AABB.MinEdge.Z = -m_AABB.MaxEdge.Z + m_absTransform[14];
-		m_AABB.MaxEdge.Z += m_absTransform[14];
 	}
 };
 

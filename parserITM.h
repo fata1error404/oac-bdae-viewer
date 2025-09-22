@@ -58,7 +58,7 @@ class TileTerrain; // forward declaration
 
 inline void loadEntity(CZipResReader *physicsArchive, const char *fname, const EntityInfo &entityInfo, TileTerrain *tile, const VEC3 &tileOff, Terrain &terrain);
 
-//! Processes a single .itm file, retrieving the tile's game object resource names, and loading all physics for base entities for each of them.
+//! Processes a single .itm file, retrieving for each tile's game object its resource file name, object type and world space info, and then calling the loader.
 inline void loadTileEntities(CZipResReader *itemsArchive, CZipResReader *physicsArchive, int gridX, int gridZ, TileTerrain *tile, Terrain &terrain)
 {
 	// 1. load .itm file into memory
@@ -125,7 +125,7 @@ inline void loadTileEntities(CZipResReader *itemsArchive, CZipResReader *physics
 	delete[] buffer;
 }
 
-//! Loads physics geometry and 3D model for a single base entity.
+//! Loads physics geometry model and 3D model for a single base entity.
 inline void loadEntity(CZipResReader *physicsArchive, const char *fname, const EntityInfo &entityInfo, TileTerrain *tile, const VEC3 &tileOff, Terrain &terrain)
 {
 	switch (entityInfo.type)
@@ -137,23 +137,22 @@ inline void loadEntity(CZipResReader *physicsArchive, const char *fname, const E
 		// 3. load .phy model
 		// ____________________
 
-		Physics *physicsGeom = Physics::load(physicsArchive, fname, entityInfo.type == ENTITY_HOUSE);
+		Physics *physicsGeom = Physics::load(physicsArchive, fname); // returned pointer is the first submesh (head node) in linked list
 
 		if (physicsGeom)
 		{
 			// build a model matrix that transforms the entity from local to world space coordinates
-			MTX4 absTransform;
-			entityInfo.rotation.getMatrix(absTransform);
+			MTX4 model;
+			entityInfo.rotation.getMatrix(model);
 
 			if (entityInfo.scale != VEC3(1.0f, 1.0f, 1.0f))
-				absTransform.postScale(entityInfo.scale);
+				model.postScale(entityInfo.scale);
 
-			absTransform.setTranslation(entityInfo.relativePos + tileOff);
+			model.setTranslation(entityInfo.relativePos + tileOff);
 
-			physicsGeom->SetSerilParentTransform(absTransform); // apply local2world transformation to entity's geometry and recursively to all connected parts of the parent game object, also updating its bounding box
+			physicsGeom->buildModelMatrix(model); // apply local2world transformation to entity's geometry
 
-			tile->BBox.addInternalBox(physicsGeom->m_groupAABB); // adjust tile's bounding box to include entity's geometry
-			tile->physicsGeometry.push_back(physicsGeom);		 // add a new physics geometry to TileTerrain object
+			tile->physicsGeometry.push_back(physicsGeom); // add a new physics geometry to TileTerrain object
 		}
 
 		break;
@@ -171,7 +170,7 @@ inline void loadEntity(CZipResReader *physicsArchive, const char *fname, const E
 
 	std::shared_ptr<Model> bdaeModel;
 
-	std::unordered_map<std::string, std::shared_ptr<Model>>::iterator it = bdaeModelCache.find(fname);
+	auto it = bdaeModelCache.find(fname);
 
 	if (it != bdaeModelCache.end()) // reuse cached model
 		bdaeModel = it->second;
@@ -184,7 +183,7 @@ inline void loadEntity(CZipResReader *physicsArchive, const char *fname, const E
 		if (newModel->modelLoaded)
 		{
 			bdaeModel = newModel;
-			bdaeModelCache.emplace(fname, bdaeModel); // add to global cache with filename as a key for quick lookup
+			bdaeModelCache[fname] = bdaeModel; // add to global cache with filename as a key for quick lookup
 		}
 		else
 			std::cout << "[Debug] loadEntity: failed to load " << fname << std::endl;
