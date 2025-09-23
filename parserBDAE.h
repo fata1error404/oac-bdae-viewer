@@ -59,6 +59,9 @@ class Model
 	std::vector<std::vector<unsigned short>> indices;
 	std::vector<unsigned int> textures;
 	std::vector<std::string> sounds;
+	std::vector<glm::mat4> meshTransform;
+	std::vector<int> meshVisibility;
+	std::vector<int> submeshToMesh;
 	glm::vec3 meshCenter;
 
 	float meshPitch = 0.0f;

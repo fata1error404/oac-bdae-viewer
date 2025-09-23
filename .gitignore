@@ -6,3 +6,5 @@ tools/
 README.pdf
 
 little_endian_not_quantized.bdae
+
+SDatabaseCollada.h

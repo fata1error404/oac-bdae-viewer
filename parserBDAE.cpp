@@ -54,10 +54,11 @@ int Model::init(IReadResFile *file)
 	LOG("\n\033[37m[Init] At position ", file->getPos(), ", reading offset, string, data and removable sections..\033[0m");
 	file->read(DataBuffer + headerSize, sizeUnRemovable - headerSize); // insert after header
 
-	// 3. parse data section: retrieve texture, material and mesh info
+	// 3. parse data section: retrieve texture, material, mesh and node info
 	int textureInfoOffset;
 	int materialCount, materialInfoOffset;
 	int meshCount, meshInfoOffset;
+	int nodeCollectionCount, nodeCollectionInfoOffset;
 
 #ifdef BETA_GAME_VERSION
 	char *ptr = DataBuffer + header->offsetData + 76; // points to texture info in the Data section
@@ -71,6 +72,8 @@ int Model::init(IReadResFile *file)
 	memcpy(&materialInfoOffset, ptr + 20, sizeof(int));
 	memcpy(&meshCount, ptr + 24, sizeof(int));
 	memcpy(&meshInfoOffset, ptr + 28, sizeof(int));
+	memcpy(&nodeCollectionCount, ptr + 72, sizeof(int));
+	memcpy(&nodeCollectionInfoOffset, ptr + 76, sizeof(int));
 
 	LOG("\nTEXTURES: ", ((textureCount != 0) ? std::to_string(textureCount) : "0, file name will be used as a texture name"));
 
@@ -205,9 +208,57 @@ int Model::init(IReadResFile *file)
 			}
 
 			submeshTextureIndex.push_back(textureIndex);
+			submeshToMesh.push_back(i);
 		}
 
 		totalSubmeshCount += submeshCount[i];
+	}
+
+	int nodeCount[nodeCollectionCount]; // normally equals to mesh count (?)
+	int nodeMetadataOffset[nodeCollectionCount];
+
+	for (int i = 0; i < nodeCollectionCount; i++)
+	{
+#ifdef BETA_GAME_VERSION
+		memcpy(&nodeCount[i], DataBuffer + nodeCollectionInfoOffset + 8 + i * 16, sizeof(int)); // [TEST] value 16
+		memcpy(&nodeMetadataOffset[i], DataBuffer + nodeCollectionInfoOffset + 12 + i * 16, sizeof(int));
+#else
+		memcpy(&nodeCount[i], DataBuffer + header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 16 + i * 24, sizeof(int));
+		memcpy(&nodeMetadataOffset[i], DataBuffer + header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 20 + i * 24, sizeof(int));
+#endif
+
+		for (int k = 0; k < nodeCount[i]; k++)
+		{
+			int isVisible;
+			float transX, transY, transZ, scaleX, scaleY, scaleZ;
+
+#ifdef BETA_GAME_VERSION
+			memcpy(&transX, DataBuffer + nodeMetadataOffset[i] + k * 80 + 12, sizeof(float));
+			memcpy(&transY, DataBuffer + nodeMetadataOffset[i] + k * 80 + 16, sizeof(float));
+			memcpy(&transZ, DataBuffer + nodeMetadataOffset[i] + k * 80 + 20, sizeof(float));
+			memcpy(&scaleX, DataBuffer + nodeMetadataOffset[i] + k * 80 + 40, sizeof(float));
+			memcpy(&scaleY, DataBuffer + nodeMetadataOffset[i] + k * 80 + 44, sizeof(float));
+			memcpy(&scaleZ, DataBuffer + nodeMetadataOffset[i] + k * 80 + 48, sizeof(float));
+			memcpy(&isVisible, DataBuffer + nodeMetadataOffset[i] + k * 80 + 52, sizeof(int));
+#else
+			memcpy(&transX, DataBuffer + header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 20 + i * 24 + nodeMetadataOffset[i] + k * 96 + 24, sizeof(float));
+			memcpy(&transY, DataBuffer + header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 20 + i * 24 + nodeMetadataOffset[i] + k * 96 + 28, sizeof(float));
+			memcpy(&transZ, DataBuffer + header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 20 + i * 24 + nodeMetadataOffset[i] + k * 96 + 32, sizeof(float));
+			memcpy(&scaleX, DataBuffer + header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 20 + i * 24 + nodeMetadataOffset[i] + k * 96 + 52, sizeof(float));
+			memcpy(&scaleY, DataBuffer + header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 20 + i * 24 + nodeMetadataOffset[i] + k * 96 + 56, sizeof(float));
+			memcpy(&scaleZ, DataBuffer + header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 20 + i * 24 + nodeMetadataOffset[i] + k * 96 + 60, sizeof(float));
+			memcpy(&isVisible, DataBuffer + header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 20 + i * 24 + nodeMetadataOffset[i] + k * 96 + 64, sizeof(int));
+#endif
+			std::cout << "position = (" << transX << ", " << transY << ", " << transZ << ") | scale = (" << scaleX << ", " << scaleY << ", " << scaleZ << ") " << std::endl;
+
+			// translate -> scale
+			glm::mat4 transform = glm::mat4(1.0f);
+			// transform = glm::translate(glm::mat4(1.0f), glm::vec3(transX, transZ, transY));
+			// transform *= glm::scale(glm::mat4(1.0f), glm::vec3(scaleX, scaleY, scaleZ));
+
+			meshTransform.push_back(transform);
+			meshVisibility.push_back(isVisible);
+		}
 	}
 
 	indices.resize(totalSubmeshCount);
@@ -646,6 +697,9 @@ void Model::reset()
 	vertices.clear();
 	indices.clear();
 	sounds.clear();
+	meshTransform.clear();
+	meshVisibility.clear();
+	submeshToMesh.clear();
 
 	fileSize = vertexCount = faceCount = textureCount = alternativeTextureCount = selectedTexture = totalSubmeshCount = 0;
 }
@@ -666,11 +720,21 @@ void Model::draw(glm::mat4 model, glm::mat4 view, glm::mat4 projection, glm::vec
 	}
 
 	shader.use();
-	shader.setMat4("model", model);
 	shader.setMat4("view", view);
 	shader.setMat4("projection", projection);
 	shader.setBool("lighting", lighting);
 	shader.setVec3("cameraPos", cameraPos);
+
+	//
+	std::vector<int> visibleSubmeshes;
+
+	for (int i = 0; i < totalSubmeshCount; i++)
+	{
+		int meshIdx = submeshToMesh[i];
+
+		if (meshVisibility[meshIdx] == 1)
+			visibleSubmeshes.push_back(i);
+	}
 
 	// render model
 	glBindVertexArray(VAO);
@@ -680,43 +744,80 @@ void Model::draw(glm::mat4 model, glm::mat4 view, glm::mat4 projection, glm::vec
 		shader.setInt("renderMode", 1);
 		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
-		for (int i = 0; i < totalSubmeshCount; i++)
+		for (int i = 0, n = visibleSubmeshes.size(); i < n; i++)
 		{
-			if (submeshTextureIndex[i] != -1)
+			int submeshIdx = visibleSubmeshes[i];
+			int meshIdx = submeshToMesh[submeshIdx];
+			shader.setMat4("model", model * meshTransform[meshIdx]);
+
+			if (submeshTextureIndex[submeshIdx] != -1)
 			{
 				glActiveTexture(GL_TEXTURE0);
-				glBindTexture(GL_TEXTURE_2D, textures[submeshTextureIndex[i]]);
+				glBindTexture(GL_TEXTURE_2D, textures[submeshTextureIndex[submeshIdx]]);
 			}
 
 			if (alternativeTextureCount > 0 && textureCount == 1)
 				glBindTexture(GL_TEXTURE_2D, textures[selectedTexture]);
 
-			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBOs[i]);
-			glDrawElements(GL_TRIANGLES, indices[i].size(), GL_UNSIGNED_SHORT, 0);
+			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBOs[submeshIdx]);
+			glDrawElements(GL_TRIANGLES, indices[submeshIdx].size(), GL_UNSIGNED_SHORT, 0);
 		}
 	}
 	else
 	{
-		// first pass: render mesh edges (wireframe mode)
-		shader.setInt("renderMode", 2);
-		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-
-		for (int i = 0; i < totalSubmeshCount; i++)
-		{
-			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBOs[i]);
-			glDrawElements(GL_TRIANGLES, indices[i].size(), GL_UNSIGNED_SHORT, 0);
-		}
-
-		// second pass: render mesh faces
-		shader.setInt("renderMode", 3);
+		shader.setInt("renderMode", 1);
 		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
-		for (int i = 0; i < totalSubmeshCount; i++)
+		for (int i = 0, n = visibleSubmeshes.size(); i < n; i++)
 		{
-			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBOs[i]);
-			glDrawElements(GL_TRIANGLES, indices[i].size(), GL_UNSIGNED_SHORT, 0);
+			int submeshIdx = visibleSubmeshes[i];
+			int meshIdx = submeshToMesh[submeshIdx];
+			shader.setMat4("model", model);
+
+			if (submeshTextureIndex[submeshIdx] != -1)
+			{
+				glActiveTexture(GL_TEXTURE0);
+				glBindTexture(GL_TEXTURE_2D, textures[submeshTextureIndex[submeshIdx]]);
+			}
+
+			if (alternativeTextureCount > 0 && textureCount == 1)
+				glBindTexture(GL_TEXTURE_2D, textures[selectedTexture]);
+
+			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBOs[submeshIdx]);
+			glDrawElements(GL_TRIANGLES, indices[submeshIdx].size(), GL_UNSIGNED_SHORT, 0);
 		}
 	}
+
+	// else
+	// {
+	// 	// first pass: render mesh edges (wireframe mode)
+	// 	shader.setInt("renderMode", 2);
+	// 	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+
+	// 	for (int i = 0, n = visibleSubmeshes.size(); i < n; i++)
+	// 	{
+	// 		int submeshIdx = visibleSubmeshes[i];
+	// 		int meshIdx = submeshToMesh[submeshIdx];
+	// 		shader.setMat4("model", model);
+
+	// 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBOs[submeshIdx]);
+	// 		glDrawElements(GL_TRIANGLES, indices[submeshIdx].size(), GL_UNSIGNED_SHORT, 0);
+	// 	}
+
+	// 	// second pass: render mesh faces
+	// 	shader.setInt("renderMode", 3);
+	// 	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+
+	// 	for (int i = 0, n = visibleSubmeshes.size(); i < n; i++)
+	// 	{
+	// 		int submeshIdx = visibleSubmeshes[i];
+	// 		int meshIdx = submeshToMesh[submeshIdx];
+	// 		shader.setMat4("model", model);
+
+	// 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBOs[submeshIdx]);
+	// 		glDrawElements(GL_TRIANGLES, indices[submeshIdx].size(), GL_UNSIGNED_SHORT, 0);
+	// 	}
+	// }
 
 	glBindVertexArray(0);
 }

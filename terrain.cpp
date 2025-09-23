@@ -1261,26 +1261,26 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool rende
 	}
 
 	// render physics
-	for (TileTerrain *tile : tilesVisible)
-	{
-		if (!tile)
-			continue;
+	// for (TileTerrain *tile : tilesVisible)
+	// {
+	// 	if (!tile)
+	// 		continue;
 
-		if (tile->phyVAO == 0 || tile->phyVBO == 0)
-			continue;
+	// 	if (tile->phyVAO == 0 || tile->phyVBO == 0)
+	// 		continue;
 
-		glBindVertexArray(tile->phyVAO);
+	// 	glBindVertexArray(tile->phyVAO);
 
-		shader.setInt("renderMode", 4);
-		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-		glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
+	// 	shader.setInt("renderMode", 4);
+	// 	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+	// 	glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
 
-		shader.setInt("renderMode", 2);
-		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-		glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
+	// 	shader.setInt("renderMode", 2);
+	// 	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+	// 	glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
 
-		glBindVertexArray(0);
-	}
+	// 	glBindVertexArray(0);
+	// }
 
 	// render water and 3D models
 	for (TileTerrain *tile : tilesVisible)
@@ -1290,18 +1290,18 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool rende
 
 		tile->water.draw(view, projection, light.showLighting, simple, dt, camera.Position);
 
-		// for (auto &mi : tile->models)
-		// {
-		// 	const std::shared_ptr<Model> &m = mi.first;
-		// 	const glm::mat4 &instModel = mi.second;
+		for (auto &mi : tile->models)
+		{
+			const std::shared_ptr<Model> &m = mi.first;
+			const glm::mat4 &instModel = mi.second;
 
-		// 	if (!m)
-		// 		continue;
-		// 	if (!m->modelLoaded)
-		// 		continue;
+			if (!m)
+				continue;
+			if (!m->modelLoaded)
+				continue;
 
-		// 	m->draw(instModel, view, projection, camera.Position, light.showLighting, simple);
-		// }
+			m->draw(instModel, view, projection, camera.Position, light.showLighting, simple);
+		}
 	}
 
 	// render skybox

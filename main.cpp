@@ -64,7 +64,7 @@ bool fileDialogOpen = false;	   // flag that indicates whether to block all back
 bool settingsPanelHovered = false; // flag that indicated whether to block background mouse input (when interacting with the settings panel)
 bool displayBaseMesh = false;	   // flag that indicates base / textured mesh display mode
 bool displayNavMesh = false;	   // flag that indicates whether to show walkable areas
-bool isTerrainViewer = true;
+bool isTerrainViewer = false;
 
 int main()
 {
