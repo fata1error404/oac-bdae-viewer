@@ -64,7 +64,8 @@ bool fileDialogOpen = false;	   // flag that indicates whether to block all back
 bool settingsPanelHovered = false; // flag that indicated whether to block background mouse input (when interacting with the settings panel)
 bool displayBaseMesh = false;	   // flag that indicates base / textured mesh display mode
 bool displayNavMesh = false;	   // flag that indicates whether to show walkable areas
-bool isTerrainViewer = false;
+bool displayPhysics = false;	   // flag that indicates whether to show walkable areas
+bool isTerrainViewer = true;
 
 int main()
 {
@@ -282,11 +283,13 @@ int main()
 			ImGui::Text("Faces: %d", terrainModel.faceCount);
 			ImGui::Text("3D Models: %d", terrainModel.modelCount);
 			ImGui::NewLine();
-			ImGui::Checkbox("Base Mesh On/Off", &displayBaseMesh);
+			ImGui::Checkbox("Base Mesh (K)", &displayBaseMesh);
 			ImGui::Spacing();
-			ImGui::Checkbox("Walkable Areas On/Off", &displayNavMesh);
+			ImGui::Checkbox("Walkable (N)", &displayNavMesh);
 			ImGui::Spacing();
-			ImGui::Checkbox("Lighting On/Off", &ourLight.showLighting);
+			ImGui::Checkbox("Physics (M)", &displayPhysics);
+			ImGui::Spacing();
+			ImGui::Checkbox("Lighting (L)", &ourLight.showLighting);
 			ImGui::NewLine();
 			ImGui::TextWrapped("Terrain: %d x %d tiles", terrainModel.tilesX, terrainModel.tilesZ);
 			ImGui::Text("Position: (x, y, z)");
@@ -320,7 +323,7 @@ int main()
 			ourLight.draw(view, projection); // render light cube
 		}
 		else if (terrainModel.terrainLoaded)
-			terrainModel.draw(view, projection, displayBaseMesh, displayNavMesh, deltaTime); // render terrain
+			terrainModel.draw(view, projection, displayBaseMesh, displayNavMesh, displayPhysics, deltaTime); // render terrain
 
 		// render settings panel (and file browsing dialog, if open)
 		ImGui::Render();
@@ -407,6 +410,9 @@ void key_callback(GLFWwindow *window, int key, int scancode, int action, int mod
 			break;
 		case GLFW_KEY_N:
 			displayNavMesh = !displayNavMesh;
+			break;
+		case GLFW_KEY_M:
+			displayPhysics = !displayPhysics;
 			break;
 		case GLFW_KEY_F:
 		{

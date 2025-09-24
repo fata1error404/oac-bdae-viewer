@@ -3,16 +3,6 @@
 
 #include <iostream>
 
-// #define MODEL_INFO
-
-template <typename... Args>
-inline void LOG(Args &&...args)
-{
-#ifdef MODEL_INFO
-	(std::cout << ... << args) << std::endl;
-#endif
-}
-
 // #include "Singleton.h"
 // // #include "Thread.h"
 // // #include "NetPacket.h"

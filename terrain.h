@@ -86,7 +86,7 @@ class Terrain
 	void reset();
 
 	//! Renders terrain (.trn + .phy + .nav + .bdae).
-	void draw(glm::mat4 view, glm::mat4 projection, bool simple, bool renderNavMesh, float dt);
+	void draw(glm::mat4 view, glm::mat4 projection, bool simple, bool renderNavMesh, bool renderPhysics, float dt);
 };
 
 #endif

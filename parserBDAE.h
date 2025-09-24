@@ -10,8 +10,19 @@
 #include "sound.h"
 #include "light.h"
 
+// if defined, viewer prints detailed model info in terminal
+// #define CONSOLE_DEBUG_LOG
+
+template <typename... Args>
+inline void LOG(Args &&...args)
+{
+#ifdef CONSOLE_DEBUG_LOG
+	(std::cout << ... << args) << std::endl;
+#endif
+}
+
 // if defined, viewer works with .bdae version from oac 1.0.3; if undefined, with oac 4.2.5
-// #define BETA_GAME_VERSION
+#define BETA_GAME_VERSION
 
 #ifdef BETA_GAME_VERSION
 typedef uint32_t BDAEint;
@@ -21,7 +32,7 @@ typedef uint64_t BDAEint;
 
 const float meshRotationSensitivity = 0.3f;
 
-// 80 bytes
+// 60 or 80 bytes (depends on .bdae version)
 struct BDAEFileHeader
 {
 	unsigned int signature;									// 4 bytes  file signature – 'BRES' for .bdae file
@@ -31,7 +42,7 @@ struct BDAEFileHeader
 	unsigned int sizeOfFile;								// 4 bytes  file size in bytes
 	unsigned int numOffsets;								// 4 bytes  number of entries in the offset table
 	unsigned int origin;									// 4 bytes  file origin – always '0' for standalone .bdae files (?)
-	BDAEint offsetOffsetTable;								// 8 bytes  offset to Offset Data section (in bytes, from the beginning of the file) – should be 80
+	BDAEint offsetOffsetTable;								// 8 bytes  offset to Offset Data section (in bytes, from the beginning of the file)
 	BDAEint offsetStringTable;								// 8 bytes  offset to String Data section
 	BDAEint offsetData;										// 8 bytes  offset to Data section
 	BDAEint offsetRelatedFiles;								// 8 bytes  offset to related file names (?)
@@ -52,15 +63,16 @@ class Model
 	std::string fileName;
 	std::vector<std::string> textureNames;
 	std::vector<int> submeshTextureIndex;
-	int fileSize, vertexCount, faceCount, textureCount, alternativeTextureCount, selectedTexture, totalSubmeshCount;
-	unsigned int VAO, VBO;
-	std::vector<unsigned int> EBOs;
-	std::vector<float> vertices;
-	std::vector<std::vector<unsigned short>> indices;
-	std::vector<unsigned int> textures;
-	std::vector<std::string> sounds;
-	std::vector<glm::mat4> meshTransform;
-	std::vector<int> meshVisibility;
+	int fileSize, vertexCount, faceCount, totalSubmeshCount;
+	int textureCount, alternativeTextureCount, selectedTexture;
+	unsigned int VAO;								  // Vertex Attribute Object ID (stores vertex attribute configuration on GPU)
+	unsigned int VBO;								  // Vertex Buffer Object ID (stores vertex data on GPU)
+	std::vector<unsigned int> EBOs;					  // Element Buffer Object ID for each submesh (stores index data on GPU)
+	std::vector<float> vertices;					  // vertex data for whole model (x1, y1, z1, x2, y2, z2, .. )
+	std::vector<std::vector<unsigned short>> indices; // index data for each submesh (triangles)
+	std::vector<unsigned int> textures;				  // texture ID(s)
+	std::vector<std::string> sounds;				  // sound file name(s)
+	std::vector<glm::mat4> meshTransform;			  // local transformation matrix for each mesh
 	std::vector<int> submeshToMesh;
 	glm::vec3 meshCenter;
 
@@ -88,6 +100,9 @@ class Model
 
 	//! Parses .bdae file and sets up model mesh and texture data.
 	int init(IReadResFile *file);
+
+	//! Recursively parses child nodes to accumulate local transformation matrix for a single mesh (called in init).
+	void getNodeTransformation(int nodeInfoOffset, int nodeMeshIdx);
 
 	//! Loads .bdae file from disk, calls the parser and searches for alternative textures and sounds.
 	void load(const char *fpath, Sound &sound, bool isTerrainViewer);

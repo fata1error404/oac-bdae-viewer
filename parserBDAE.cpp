@@ -1,8 +1,6 @@
 #include "parserBDAE.h"
 #include <algorithm>
 #include <filesystem>
-#include "libs/glad/glad.h"
-#include "Logger.h"
 #include "PackPatchReader.h"
 
 //! Parses .bdae file and sets up model mesh and texture data.
@@ -56,6 +54,10 @@ int Model::init(IReadResFile *file)
 	file->read(DataBuffer + headerSize, sizeUnRemovable - headerSize); // insert after header
 
 	// 3. parse data section: retrieve texture, material, mesh and node info
+
+	// 3.1 TEXTURES AND MATERIALS (materials are parsed to match submesh with texture)
+	// ____________________
+
 	int textureInfoOffset;
 	int materialCount, materialInfoOffset;
 	int meshCount, meshInfoOffset;
@@ -99,7 +101,7 @@ int Model::init(IReadResFile *file)
 #endif
 			textureNames[i] = std::string((DataBuffer + textureNameOffset), textureNameLength);
 
-			LOG("[", i + 1, "]  ", textureNames[i]);
+			LOG("[", i + 1, "] ", textureNames[i]);
 		}
 
 		int materialPropertyCount[materialCount];
@@ -148,8 +150,10 @@ int Model::init(IReadResFile *file)
 		}
 	}
 
+	// 3.2 MESHES
+	// ____________________
+
 	LOG("\nMESHES: ", meshCount);
-	std::cout << "MESHES: " << meshCount << std::endl;
 
 	int meshVertexCount[meshCount];
 	int meshMetadataOffset[meshCount];
@@ -161,10 +165,8 @@ int Model::init(IReadResFile *file)
 	std::vector<int> submeshTriangleCount[meshCount];
 	std::vector<int> submeshIndexDataOffset[meshCount];
 
-	// ..
 	std::vector<std::string> meshName(meshCount);
 	meshTransform.assign(meshCount, glm::mat4(1.0f));
-	meshVisibility.assign(meshCount, 1);
 
 	for (int i = 0; i < meshCount; i++)
 	{
@@ -172,6 +174,7 @@ int Model::init(IReadResFile *file)
 		int nameLength;
 
 #ifdef BETA_GAME_VERSION
+		memcpy(&nameOffset, DataBuffer + meshInfoOffset + i * 16 + 4, sizeof(BDAEint));
 		memcpy(&meshMetadataOffset[i], DataBuffer + meshInfoOffset + 12 + i * 16, sizeof(int));
 		memcpy(&meshVertexCount[i], DataBuffer + meshMetadataOffset[i] + 4, sizeof(int));
 		memcpy(&submeshCount[i], DataBuffer + meshMetadataOffset[i] + 12, sizeof(int));
@@ -179,9 +182,7 @@ int Model::init(IReadResFile *file)
 		memcpy(&bytesPerVertex[i], DataBuffer + meshMetadataOffset[i] + 44, sizeof(int));
 		memcpy(&meshVertexDataOffset[i], DataBuffer + meshMetadataOffset[i] + 80, sizeof(int));
 #else
-		memcpy(&nameOffset, DataBuffer + header->offsetData + 120 + 4 + meshInfoOffset + i * 24, sizeof(BDAEint));
-		memcpy(&nameLength, DataBuffer + nameOffset - 4, sizeof(int));
-
+		memcpy(&nameOffset, DataBuffer + header->offsetData + 120 + 4 + meshInfoOffset + i * 24 + 8, sizeof(BDAEint));
 		memcpy(&meshMetadataOffset[i], DataBuffer + header->offsetData + 120 + 4 + meshInfoOffset + 20 + i * 24, sizeof(int));
 		memcpy(&meshVertexCount[i], DataBuffer + header->offsetData + 120 + 4 + meshInfoOffset + 20 + i * 24 + meshMetadataOffset[i] + 4, sizeof(int));
 		memcpy(&submeshCount[i], DataBuffer + header->offsetData + 120 + 4 + meshInfoOffset + 20 + i * 24 + meshMetadataOffset[i] + 12, sizeof(int));
@@ -189,9 +190,10 @@ int Model::init(IReadResFile *file)
 		memcpy(&bytesPerVertex[i], DataBuffer + header->offsetData + 120 + 4 + meshInfoOffset + 20 + i * 24 + meshMetadataOffset[i] + 48, sizeof(int));
 		memcpy(&meshVertexDataOffset[i], DataBuffer + header->offsetData + 120 + 4 + meshInfoOffset + 20 + i * 24 + meshMetadataOffset[i] + 88, sizeof(int));
 #endif
+		memcpy(&nameLength, DataBuffer + nameOffset - 4, sizeof(int));
 		meshName[i] = std::string(DataBuffer + nameOffset, nameLength);
 
-		LOG("[", i + 1, "]  ", meshVertexCount[i], " vertices, ", submeshCount[i], " submeshes");
+		LOG("[", i + 1, "] ", meshName[i], " ", meshVertexCount[i], " vertices, ", submeshCount[i], " submeshes");
 
 		for (int k = 0; k < submeshCount[i]; k++)
 		{
@@ -228,13 +230,18 @@ int Model::init(IReadResFile *file)
 		totalSubmeshCount += submeshCount[i];
 	}
 
+	// 3.3 NODES (nodes are parsed to correctly position meshes within a model)
+	// ____________________
+
+	LOG("\nNODES: ", meshCount);
+
 	int nodeCount[nodeCollectionCount];
 	int nodeMetadataOffset[nodeCollectionCount];
 
 	for (int i = 0; i < nodeCollectionCount; i++)
 	{
 #ifdef BETA_GAME_VERSION
-		memcpy(&nodeCount[i], DataBuffer + nodeCollectionInfoOffset + 8 + i * 16, sizeof(int)); // [TEST] value 16
+		memcpy(&nodeCount[i], DataBuffer + nodeCollectionInfoOffset + 8 + i * 16, sizeof(int));
 		memcpy(&nodeMetadataOffset[i], DataBuffer + nodeCollectionInfoOffset + 12 + i * 16, sizeof(int));
 #else
 		memcpy(&nodeCount[i], DataBuffer + header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 16 + i * 24, sizeof(int));
@@ -243,73 +250,40 @@ int Model::init(IReadResFile *file)
 
 		for (int k = 0; k < nodeCount[i]; k++)
 		{
-			int isVisible = 1, childrenOffset = 0, instancesOffset = 0;
-			float transX, transY, transZ, scaleX, scaleY, scaleZ;
+			BDAEint nameOffset;
+			int nameLength = 0;
+			int isVisible = 1; // [unused]
 
 #ifdef BETA_GAME_VERSION
-			memcpy(&transX, DataBuffer + nodeMetadataOffset[i] + k * 80 + 12, sizeof(float));
-			memcpy(&transY, DataBuffer + nodeMetadataOffset[i] + k * 80 + 16, sizeof(float));
-			memcpy(&transZ, DataBuffer + nodeMetadataOffset[i] + k * 80 + 20, sizeof(float));
-			memcpy(&scaleX, DataBuffer + nodeMetadataOffset[i] + k * 80 + 40, sizeof(float));
-			memcpy(&scaleY, DataBuffer + nodeMetadataOffset[i] + k * 80 + 44, sizeof(float));
-			memcpy(&scaleZ, DataBuffer + nodeMetadataOffset[i] + k * 80 + 48, sizeof(float));
+			memcpy(&nameOffset, DataBuffer + nodeMetadataOffset[i] + k * 80 + 4, sizeof(BDAEint));
 			memcpy(&isVisible, DataBuffer + nodeMetadataOffset[i] + k * 80 + 52, sizeof(int));
+			int nodeInfoOffset = nodeMetadataOffset[i] + k * 80;
 #else
-			memcpy(&transX, DataBuffer + header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 20 + i * 24 + nodeMetadataOffset[i] + k * 96 + 24, sizeof(float));
-			memcpy(&transY, DataBuffer + header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 20 + i * 24 + nodeMetadataOffset[i] + k * 96 + 28, sizeof(float));
-			memcpy(&transZ, DataBuffer + header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 20 + i * 24 + nodeMetadataOffset[i] + k * 96 + 32, sizeof(float));
-			memcpy(&scaleX, DataBuffer + header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 20 + i * 24 + nodeMetadataOffset[i] + k * 96 + 52, sizeof(float));
-			memcpy(&scaleY, DataBuffer + header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 20 + i * 24 + nodeMetadataOffset[i] + k * 96 + 56, sizeof(float));
-			memcpy(&scaleZ, DataBuffer + header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 20 + i * 24 + nodeMetadataOffset[i] + k * 96 + 60, sizeof(float));
+			memcpy(&nameOffset, DataBuffer + header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 20 + i * 24 + nodeMetadataOffset[i] + k * 96 + 8, sizeof(BDAEint));
 			memcpy(&isVisible, DataBuffer + header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 20 + i * 24 + nodeMetadataOffset[i] + k * 96 + 64, sizeof(int));
-			memcpy(&childrenOffset, DataBuffer + header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 20 + i * 24 + nodeMetadataOffset[i] + k * 96 + 72, sizeof(int));
-			memcpy(&instancesOffset, DataBuffer + header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 20 + i * 24 + nodeMetadataOffset[i] + k * 96 + 80, sizeof(int));
+			int nodeInfoOffset = header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 20 + i * 24 + nodeMetadataOffset[i] + k * 96;
 #endif
-			// std::cout << "position = (" << transX << ", " << transY << ", " << transZ << ") | scale = (" << scaleX << ", " << scaleY << ", " << scaleZ << ") instances = " << instancesOffset << " " << isVisible << std::endl;
+			memcpy(&nameLength, DataBuffer + nameOffset - 4, sizeof(int));
+			std::string nodeMeshName(DataBuffer + nameOffset, nameLength);
 
-			if (instancesOffset != 0)
+			auto it = std::find(std::begin(meshName), std::end(meshName), nodeMeshName);
+
+			if (it != meshName.end())
 			{
-				BDAEint nameOffset;
-				memcpy(&nameOffset, DataBuffer + header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 20 + i * 24 + nodeMetadataOffset[i] + k * 96 + 80 + instancesOffset + 16, sizeof(BDAEint));
+				LOG("[", k, "] node --> [", std::distance(meshName.begin(), it), "] mesh");
 
-				int nameLength;
-				memcpy(&nameLength, DataBuffer + nameOffset - 4, sizeof(int));
-
-				std::string nodeMeshName(DataBuffer + nameOffset, nameLength);
-
-				// '#Object290-mesh' --> 'Object290-mesh' (real mesh name)
-				if (!nodeMeshName.empty() && nodeMeshName[0] == '#')
-					nodeMeshName.erase(0, 1);
-
-				auto it = std::find(std::begin(meshName), std::end(meshName), nodeMeshName);
-
-				if (it != meshName.end())
-				{
-					std::cout << "node [" << k << "] --> mesh [" << std::distance(meshName.begin(), it) << "] (" << nodeMeshName << ")" << std::endl;
-
-					// translate -> scale
-					glm::mat4 transform = glm::mat4(1.0f);
-					transform = glm::translate(glm::mat4(1.0f), glm::vec3(transX, transY, transZ));
-					transform *= glm::scale(glm::mat4(1.0f), glm::vec3(scaleX, scaleY, scaleZ));
-
-					int meshIdx = std::distance(meshName.begin(), it);
-					meshTransform[meshIdx] = transform;
-					meshVisibility[meshIdx] = isVisible;
-				}
-				else
-					std::cout << "[Debug] Model::init: mesh name " << nodeMeshName << " for node [" << k << "] not found!" << std::endl;
+				int meshIdx = std::distance(meshName.begin(), it);
+				getNodeTransformation(nodeInfoOffset, meshIdx);
 			}
-			else if (childrenOffset != 0)
-				std::cout << "[Debug] Model::init: node [" << k << "] " << childrenOffset << std::endl;
 			else
-				std::cout << "[Debug] Model::init: no children nodes or instances for node [" << k << "] found." << std::endl;
+				LOG("[Warning] Model::init: mesh name ", nodeMeshName, " for node [", k, "] not found!");
 		}
 	}
 
+	// 4. parse removable section: build vertex and index data for each mesh; all vertex data is stored in a single flat vector, while index data is stored in separate vectors for each submesh
 	indices.resize(totalSubmeshCount);
 	int currentSubmeshIndex = 0;
 
-	// 4. parse removable section: build vertex and index data for each mesh; all vertex data is stored in a single flat vector, while index data is stored in separate vectors for each submesh
 	for (int i = 0; i < meshCount; i++)
 	{
 		int vertexBase = (int)(vertices.size() / 8); // [FIX] to convert vertex indices from local to global range
@@ -354,6 +328,57 @@ int Model::init(IReadResFile *file)
 
 	delete header;
 	return 0;
+}
+
+//! Recursively parses child nodes to accumulate local transformation matrix for a single mesh (called in init).
+void Model::getNodeTransformation(int nodeInfoOffset, int nodeMeshIdx)
+{
+	int childrenOffset = 0;
+	float transX, transY, transZ;
+	float rotX, rotY, rotZ, rotW;
+	float scaleX, scaleY, scaleZ;
+
+#ifdef BETA_GAME_VERSION
+	memcpy(&transX, DataBuffer + nodeInfoOffset + 12, sizeof(float));
+	memcpy(&transY, DataBuffer + nodeInfoOffset + 16, sizeof(float));
+	memcpy(&transZ, DataBuffer + nodeInfoOffset + 20, sizeof(float));
+	memcpy(&rotX, DataBuffer + nodeInfoOffset + 24, sizeof(float));
+	memcpy(&rotY, DataBuffer + nodeInfoOffset + 28, sizeof(float));
+	memcpy(&rotZ, DataBuffer + nodeInfoOffset + 32, sizeof(float));
+	memcpy(&rotW, DataBuffer + nodeInfoOffset + 36, sizeof(float));
+	memcpy(&scaleX, DataBuffer + nodeInfoOffset + 40, sizeof(float));
+	memcpy(&scaleY, DataBuffer + nodeInfoOffset + 44, sizeof(float));
+	memcpy(&scaleZ, DataBuffer + nodeInfoOffset + 48, sizeof(float));
+	memcpy(&childrenOffset, DataBuffer + nodeInfoOffset + 60, sizeof(int));
+#else
+	memcpy(&transX, DataBuffer + nodeInfoOffset + 24, sizeof(float));
+	memcpy(&transY, DataBuffer + nodeInfoOffset + 28, sizeof(float));
+	memcpy(&transZ, DataBuffer + nodeInfoOffset + 32, sizeof(float));
+	memcpy(&rotX, DataBuffer + nodeInfoOffset + 36, sizeof(float));
+	memcpy(&rotY, DataBuffer + nodeInfoOffset + 40, sizeof(float));
+	memcpy(&rotZ, DataBuffer + nodeInfoOffset + 44, sizeof(float));
+	memcpy(&rotW, DataBuffer + nodeInfoOffset + 48, sizeof(float));
+	memcpy(&scaleX, DataBuffer + nodeInfoOffset + 52, sizeof(float));
+	memcpy(&scaleY, DataBuffer + nodeInfoOffset + 56, sizeof(float));
+	memcpy(&scaleZ, DataBuffer + nodeInfoOffset + 60, sizeof(float));
+	memcpy(&childrenOffset, DataBuffer + nodeInfoOffset + 72, sizeof(int));
+
+	if (childrenOffset != 0)
+		childrenOffset += nodeInfoOffset + 72;
+#endif
+
+	// translate -> rotate -> scale
+	glm::mat4 nodeLocalTransform(1.0f);
+	nodeLocalTransform = glm::translate(glm::mat4(1.0f), glm::vec3(transX, transY, transZ));
+	nodeLocalTransform *= glm::mat4_cast(glm::quat(-rotW, rotX, rotY, rotZ));
+	nodeLocalTransform *= glm::scale(glm::mat4(1.0f), glm::vec3(scaleX, scaleY, scaleZ));
+
+	// combine with parent node transformation matrix
+	meshTransform[nodeMeshIdx] *= nodeLocalTransform;
+
+	// if has child node, recursive call
+	if (childrenOffset != 0)
+		getNodeTransformation(childrenOffset, nodeMeshIdx);
 }
 
 //! Loads .bdae file from disk, calls the parser and searches for alternative textures and sounds.
@@ -743,7 +768,6 @@ void Model::reset()
 	indices.clear();
 	sounds.clear();
 	meshTransform.clear();
-	meshVisibility.clear();
 	submeshToMesh.clear();
 
 	fileSize = vertexCount = faceCount = textureCount = alternativeTextureCount = selectedTexture = totalSubmeshCount = 0;
@@ -770,17 +794,6 @@ void Model::draw(glm::mat4 model, glm::mat4 view, glm::mat4 projection, glm::vec
 	shader.setBool("lighting", lighting);
 	shader.setVec3("cameraPos", cameraPos);
 
-	//
-	std::vector<int> visibleSubmeshes;
-
-	for (int i = 0; i < totalSubmeshCount; i++)
-	{
-		int meshIdx = submeshToMesh[i];
-
-		if (meshVisibility[meshIdx] == 1)
-			visibleSubmeshes.push_back(i);
-	}
-
 	// render model
 	glBindVertexArray(VAO);
 
@@ -789,80 +802,52 @@ void Model::draw(glm::mat4 model, glm::mat4 view, glm::mat4 projection, glm::vec
 		shader.setInt("renderMode", 1);
 		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
-		for (int i = 0, n = visibleSubmeshes.size(); i < n; i++)
+		for (int i = 0; i < totalSubmeshCount; i++)
 		{
-			int submeshIdx = visibleSubmeshes[i];
-			int meshIdx = submeshToMesh[submeshIdx];
+			int meshIdx = submeshToMesh[i];
 			shader.setMat4("model", model * meshTransform[meshIdx]);
 
-			if (submeshTextureIndex[submeshIdx] != -1)
+			if (submeshTextureIndex[i] != -1)
 			{
 				glActiveTexture(GL_TEXTURE0);
-				glBindTexture(GL_TEXTURE_2D, textures[submeshTextureIndex[submeshIdx]]);
+				glBindTexture(GL_TEXTURE_2D, textures[submeshTextureIndex[i]]);
 			}
 
 			if (alternativeTextureCount > 0 && textureCount == 1)
 				glBindTexture(GL_TEXTURE_2D, textures[selectedTexture]);
 
-			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBOs[submeshIdx]);
-			glDrawElements(GL_TRIANGLES, indices[submeshIdx].size(), GL_UNSIGNED_SHORT, 0);
+			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBOs[i]);
+			glDrawElements(GL_TRIANGLES, indices[i].size(), GL_UNSIGNED_SHORT, 0);
 		}
 	}
 	else
 	{
-		shader.setInt("renderMode", 1);
+		// first pass: render mesh edges (wireframe mode)
+		shader.setInt("renderMode", 2);
+		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+
+		for (int i = 0; i < totalSubmeshCount; i++)
+		{
+			int meshIdx = submeshToMesh[i];
+			shader.setMat4("model", model * meshTransform[meshIdx]);
+
+			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBOs[i]);
+			glDrawElements(GL_TRIANGLES, indices[i].size(), GL_UNSIGNED_SHORT, 0);
+		}
+
+		// second pass: render mesh faces
+		shader.setInt("renderMode", 3);
 		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
-		for (int i = 0, n = visibleSubmeshes.size(); i < n; i++)
+		for (int i = 0; i < totalSubmeshCount; i++)
 		{
-			int submeshIdx = visibleSubmeshes[i];
-			int meshIdx = submeshToMesh[submeshIdx];
-			shader.setMat4("model", model);
+			int meshIdx = submeshToMesh[i];
+			shader.setMat4("model", model * meshTransform[meshIdx]);
 
-			if (submeshTextureIndex[submeshIdx] != -1)
-			{
-				glActiveTexture(GL_TEXTURE0);
-				glBindTexture(GL_TEXTURE_2D, textures[submeshTextureIndex[submeshIdx]]);
-			}
-
-			if (alternativeTextureCount > 0 && textureCount == 1)
-				glBindTexture(GL_TEXTURE_2D, textures[selectedTexture]);
-
-			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBOs[submeshIdx]);
-			glDrawElements(GL_TRIANGLES, indices[submeshIdx].size(), GL_UNSIGNED_SHORT, 0);
+			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBOs[i]);
+			glDrawElements(GL_TRIANGLES, indices[i].size(), GL_UNSIGNED_SHORT, 0);
 		}
 	}
-
-	// else
-	// {
-	// 	// first pass: render mesh edges (wireframe mode)
-	// 	shader.setInt("renderMode", 2);
-	// 	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-
-	// 	for (int i = 0, n = visibleSubmeshes.size(); i < n; i++)
-	// 	{
-	// 		int submeshIdx = visibleSubmeshes[i];
-	// 		int meshIdx = submeshToMesh[submeshIdx];
-	// 		shader.setMat4("model", model);
-
-	// 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBOs[submeshIdx]);
-	// 		glDrawElements(GL_TRIANGLES, indices[submeshIdx].size(), GL_UNSIGNED_SHORT, 0);
-	// 	}
-
-	// 	// second pass: render mesh faces
-	// 	shader.setInt("renderMode", 3);
-	// 	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-
-	// 	for (int i = 0, n = visibleSubmeshes.size(); i < n; i++)
-	// 	{
-	// 		int submeshIdx = visibleSubmeshes[i];
-	// 		int meshIdx = submeshToMesh[submeshIdx];
-	// 		shader.setMat4("model", model);
-
-	// 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBOs[submeshIdx]);
-	// 		glDrawElements(GL_TRIANGLES, indices[submeshIdx].size(), GL_UNSIGNED_SHORT, 0);
-	// 	}
-	// }
 
 	glBindVertexArray(0);
 }

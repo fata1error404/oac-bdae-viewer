@@ -1202,7 +1202,7 @@ void Terrain::updateVisibleTiles(glm::mat4 view, glm::mat4 projection)
 }
 
 //! Renders terrain and physics geometry meshes.
-void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool renderNavMesh, float dt)
+void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool renderNavMesh, bool renderPhysics, float dt)
 {
 	if (!terrainLoaded)
 		return;
@@ -1261,26 +1261,29 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool rende
 	}
 
 	// render physics
-	// for (TileTerrain *tile : tilesVisible)
-	// {
-	// 	if (!tile)
-	// 		continue;
+	if (renderPhysics)
+	{
+		for (TileTerrain *tile : tilesVisible)
+		{
+			if (!tile)
+				continue;
 
-	// 	if (tile->phyVAO == 0 || tile->phyVBO == 0)
-	// 		continue;
+			if (tile->phyVAO == 0 || tile->phyVBO == 0)
+				continue;
 
-	// 	glBindVertexArray(tile->phyVAO);
+			glBindVertexArray(tile->phyVAO);
 
-	// 	shader.setInt("renderMode", 4);
-	// 	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-	// 	glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
+			shader.setInt("renderMode", 4);
+			glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+			glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
 
-	// 	shader.setInt("renderMode", 2);
-	// 	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-	// 	glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
+			shader.setInt("renderMode", 2);
+			glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+			glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
 
-	// 	glBindVertexArray(0);
-	// }
+			glBindVertexArray(0);
+		}
+	}
 
 	// render water and 3D models
 	for (TileTerrain *tile : tilesVisible)
