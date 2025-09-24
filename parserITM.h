@@ -68,7 +68,7 @@ inline void loadTileEntities(CZipResReader *itemsArchive, CZipResReader *physics
 
 #ifdef BETA_GAME_VERSION
 	std::string terrainName = std::filesystem::path(itemsArchive->getZipFileName()).stem().string();
-	sprintf(tmpName, "world/%s/items/%04d_%04d.itm", terrainName.c_str(), gridX, gridZ); // path inside the .itm archive
+	sprintf(tmpName, "%04d_%04d.itm", gridX, gridZ);
 #else
 	sprintf(tmpName, "items/%04d_%04d.itm", gridX, gridZ);
 #endif

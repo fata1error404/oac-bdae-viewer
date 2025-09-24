@@ -33,7 +33,6 @@ TileTerrain *TileTerrain::load(IReadResFile *trnFile, int &gridX, int &gridZ, Te
 	tileTerrain->BBox.MinEdge = VEC3(tileTerrain->startX, 0, tileTerrain->startZ);
 	tileTerrain->BBox.MaxEdge = VEC3(tileTerrain->startX + UnitsInTileRow, 0, tileTerrain->startZ + UnitsInTileCol);
 
-#ifndef BETA_GAME_VERSION
 	// 3. parse string data section, retrieve: number of textures, texture file names
 	// ____________________
 
@@ -97,19 +96,6 @@ TileTerrain *TileTerrain::load(IReadResFile *trnFile, int &gridX, int &gridZ, Te
 				tileTerrain->chunks[index].texNameIndex3 = newTexNameIndex[tileTerrain->chunks[index].texNameIndex3];
 		}
 	}
-#else
-	int chunkOffset = sizeof(TRNFileHeader);
-
-	for (int index = 0, i = 0; i < ChunksInTileRow; i++)
-	{
-		for (int j = 0; j < ChunksInTileCol; j++, index++)
-		{
-			ChunkInfo *chunk = (ChunkInfo *)(buffer + chunkOffset);
-			tileTerrain->chunks[index] = *chunk;
-			chunkOffset += sizeof(ChunkInfo);
-		}
-	}
-#endif
 
 	// 5. parse height map
 	// ____________________
@@ -138,7 +124,6 @@ TileTerrain *TileTerrain::load(IReadResFile *trnFile, int &gridX, int &gridZ, Te
 	tileTerrain->BBox.MinEdge.Y = minHeight * 0.01f;
 	tileTerrain->BBox.MaxEdge.Y = maxHeight * 0.01f;
 
-#ifndef BETA_GAME_VERSION
 	// 6. parse vertex colors (colors are stored as 32-bit packed RGBA)
 	// ____________________
 
@@ -183,7 +168,6 @@ TileTerrain *TileTerrain::load(IReadResFile *trnFile, int &gridX, int &gridZ, Te
 			tileTerrain->normals[vy][vx] = n;
 		}
 	}
-#endif
 
 	if (buffer != loadBuffer)
 		delete[] buffer;
