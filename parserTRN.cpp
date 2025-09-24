@@ -124,50 +124,51 @@ TileTerrain *TileTerrain::load(IReadResFile *trnFile, int &gridX, int &gridZ, Te
 	tileTerrain->BBox.MinEdge.Y = minHeight * 0.01f;
 	tileTerrain->BBox.MaxEdge.Y = maxHeight * 0.01f;
 
-	// 6. parse vertex colors (colors are stored as 32-bit packed RGBA)
-	// ____________________
+	/*
+		// 6. parse vertex colors (colors are stored as 16-bit packed RGB-565)
+		// ____________________
 
-	short *color = (short *)(buffer + sizeof(TRNFileHeader) + ChunksInTile * sizeof(ChunkInfo) + ((UnitsInTileRow + 1) * (UnitsInTileCol + 1)) * 2);
+		uint16_t *color = (uint16_t *)(buffer + sizeof(TRNFileHeader) + ChunksInTile * sizeof(ChunkInfo) + ((UnitsInTileRow + 1) * (UnitsInTileCol + 1)) * sizeof(short));
 
-	for (int v = 0, vy = 0; vy <= UnitsInTileRow; vy++)
-	{
-		for (int vx = 0; vx <= UnitsInTileCol; vx++, v++)
+		for (int v = 0, vy = 0; vy <= UnitsInTileRow; vy++)
 		{
-			// unpack 32-bit RGBA value into 8-bit components (bitwise arithmetic)
-			uint32_t packed = static_cast<uint32_t>(color[v]);
-			uint8_t a = (packed >> 24) & 0xFF;
-			uint8_t r = (packed >> 16) & 0xFF;
-			uint8_t g = (packed >> 8) & 0xFF;
-			uint8_t b = (packed >> 0) & 0xFF;
+			for (int vx = 0; vx <= UnitsInTileCol; vx++, v++)
+			{
+				uint16_t c = color[v];
+				// unpack 16-bit RGB-565 color into 8-bit RGBA components (bitwise arithmetic)
+				uint8_t r = (uint8_t)(((c & 0xF800) >> 8) | ((c & 0xF800) >> 13));
+				uint8_t g = (uint8_t)(((c & 0x07E0) >> 3) | ((c & 0x07E0) >> 9));
+				uint8_t b = (uint8_t)(((c & 0x001F) << 3) | ((c & 0x001F) >> 2));
 
-			tileTerrain->colors[vy][vx] = glm::u8vec4(r, g, b, a);
+				tileTerrain->colors[vy][vx] = glm::u8vec4(r, g, b, 0xFF);
+			}
 		}
-	}
 
-	// 7. parse vertex normal vectors (normals are stores as unsigned bytes)
-	// ____________________
+		// 7. parse vertex normal vectors (normals are stores as signed bytes)
+		// ____________________
 
-	char *normal = (char *)(buffer + sizeof(TRNFileHeader) + ChunksInTile * sizeof(ChunkInfo) + ((UnitsInTileRow + 1) * (UnitsInTileCol + 1)) * 4);
+		int8_t *normal = (int8_t *)(buffer + sizeof(TRNFileHeader) + ChunksInTile * sizeof(ChunkInfo) + ((UnitsInTileRow + 1) * (UnitsInTileCol + 1)) * 4);
 
-	for (int v = 0, vy = 0; vy <= UnitsInTileRow; vy++)
-	{
-		for (int vx = 0; vx <= UnitsInTileCol; vx++, v++)
+		for (int v = 0, vy = 0; vy <= UnitsInTileRow; vy++)
 		{
-			glm::vec3 n;
-			uint8_t nx = normal[v * 3];
-			uint8_t ny = normal[v * 3 + 1];
-			uint8_t nz = normal[v * 3 + 2];
+			for (int vx = 0; vx <= UnitsInTileCol; vx++, v++)
+			{
+				glm::vec3 n;
+				int8_t nx = normal[v * 3];
+				int8_t ny = normal[v * 3 + 1];
+				int8_t nz = normal[v * 3 + 2];
 
-			// convert from [0, 255] range to [-1, 1]
-			n.x = (nx / 127.5f) - 1.0f;
-			n.y = (ny / 127.5f) - 1.0f;
-			n.z = (nz / 127.5f) - 1.0f;
+				// convert from [-128, 127] range to [-1, 1]
+				n.x = nx * 0.007874f;
+				n.y = ny * 0.007874f;
+				n.z = nz * 0.007874f;
 
-			n = glm::normalize(n); // ensure the vector is unit length
+				n = glm::normalize(n); // ensure the vector is unit length
 
-			tileTerrain->normals[vy][vx] = n;
+				tileTerrain->normals[vy][vx] = n;
+			}
 		}
-	}
+	*/
 
 	if (buffer != loadBuffer)
 		delete[] buffer;

@@ -65,13 +65,7 @@ inline void loadTileEntities(CZipResReader *itemsArchive, CZipResReader *physics
 	// ____________________
 
 	char tmpName[256];
-
-#ifdef BETA_GAME_VERSION
-	std::string terrainName = std::filesystem::path(itemsArchive->getZipFileName()).stem().string();
 	sprintf(tmpName, "%04d_%04d.itm", gridX, gridZ);
-#else
-	sprintf(tmpName, "items/%04d_%04d.itm", gridX, gridZ);
-#endif
 
 	IReadResFile *itmFile = itemsArchive->openFile(tmpName);
 
@@ -137,23 +131,25 @@ inline void loadEntity(CZipResReader *physicsArchive, const char *fname, const E
 		// 3. load .phy model
 		// ____________________
 
-		Physics *physicsGeom = Physics::load(physicsArchive, fname); // returned pointer is the first submesh (head node) in linked list
+		/*
+			Physics *physicsGeom = Physics::load(physicsArchive, fname); // returned pointer is the first submesh (head node) in linked list
 
-		if (physicsGeom)
-		{
-			// build a model matrix that transforms the entity from local to world space coordinates
-			MTX4 model;
-			entityInfo.rotation.getMatrix(model);
+			if (physicsGeom)
+			{
+				// build a model matrix that transforms the entity from local to world space coordinates
+				MTX4 model;
+				entityInfo.rotation.getMatrix(model);
 
-			if (entityInfo.scale != VEC3(1.0f, 1.0f, 1.0f))
-				model.postScale(entityInfo.scale);
+				if (entityInfo.scale != VEC3(1.0f, 1.0f, 1.0f))
+					model.postScale(entityInfo.scale);
 
-			model.setTranslation(entityInfo.relativePos + tileOff);
+				model.setTranslation(entityInfo.relativePos + tileOff);
 
-			physicsGeom->buildModelMatrix(model); // apply local2world transformation to entity's geometry
+				physicsGeom->buildModelMatrix(model); // apply local2world transformation to entity's geometry
 
-			tile->physicsGeometry.push_back(physicsGeom); // add a new physics geometry to TileTerrain object
-		}
+				tile->physicsGeometry.push_back(physicsGeom); // add a new physics geometry to TileTerrain object
+			}
+		*/
 
 		break;
 	}

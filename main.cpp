@@ -292,6 +292,8 @@ int main()
 			ImGui::Checkbox("Lighting (L)", &ourLight.showLighting);
 			ImGui::NewLine();
 			ImGui::TextWrapped("Terrain: %d x %d tiles", terrainModel.tilesX, terrainModel.tilesZ);
+			ImGui::NewLine();
+			ImGui::TextWrapped("Pitch: %.2f, Yaw: %.2f", ourCamera.Pitch, ourCamera.Yaw);
 			ImGui::Text("Position: (x, y, z)");
 			ImGui::Spacing();
 

@@ -25,7 +25,7 @@ class Light
 
 	Light()
 		: shader("shaders/lightcube.vs", "shaders/lightcube.fs"),
-		  showLighting(false)
+		  showLighting(true)
 	{
 		shader.use();
 		shader.setMat4("model", glm::translate(glm::mat4(1.0f), lightPos));

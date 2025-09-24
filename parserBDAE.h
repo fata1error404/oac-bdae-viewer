@@ -22,7 +22,7 @@ inline void LOG(Args &&...args)
 }
 
 // if defined, viewer works with .bdae version from oac 1.0.3; if undefined, with oac 4.2.5
-#define BETA_GAME_VERSION
+// #define BETA_GAME_VERSION
 
 #ifdef BETA_GAME_VERSION
 typedef uint32_t BDAEint;

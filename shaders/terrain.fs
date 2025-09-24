@@ -19,80 +19,80 @@ uniform vec3 lightColor;
 uniform float ambientStrength;
 uniform float diffuseStrength;
 uniform float specularStrength;
+uniform int terrainBlendMode; // 0 = average, 1 = weighted, 2 = dominant
 
 void main()
 {
     if (renderMode == 1)
     {
-    // 1) Equal‐weight blend of whatever layers you have
         vec3 texCol = vec3(0.0);
-        float totalWeight = 0.0;
+        float count = 0.0;
+        vec3 weights = max(vec3(0.0), BlendWeights.rgb); // ensure non-negative
 
-        // Sample only valid textures, and only use their corresponding weights
-        if (texIdx.x >= 0) {
-            texCol += texture(terrainArray, vec3(TexCoord, texIdx.x)).rgb * BlendWeights.x;
-            totalWeight += BlendWeights.x;
+        if (terrainBlendMode == 2) // Dominant: pick texture with largest weight (or fallback to average)
+        {
+            // find index of max weight among present textures
+            int bestIdx = -1;
+            float bestW = -1.0;
+            if (texIdx.x >= 0 && weights.x > bestW) { bestW = weights.x; bestIdx = texIdx.x; }
+            if (texIdx.y >= 0 && weights.y > bestW) { bestW = weights.y; bestIdx = texIdx.y; }
+            if (texIdx.z >= 0 && weights.z > bestW) { bestW = weights.z; bestIdx = texIdx.z; }
+
+            if (bestIdx >= 0)
+            {
+                texCol = texture(terrainArray, vec3(TexCoord, bestIdx)).rgb;
+            }
+            else
+            {
+                // fallback average
+                if (texIdx.x >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.x)).rgb; count += 1.0; }
+                if (texIdx.y >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.y)).rgb; count += 1.0; }
+                if (texIdx.z >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.z)).rgb; count += 1.0; }
+                if (count > 0.0) texCol /= count; else texCol = vec3(0.2);
+            }
         }
-        if (texIdx.y >= 0) {
-            texCol += texture(terrainArray, vec3(TexCoord, texIdx.y)).rgb * BlendWeights.y;
-            totalWeight += BlendWeights.y;
+        else if (terrainBlendMode == 1) // Weighted: use BlendWeights as mixing weights
+        {
+            float wsum = 0.0;
+            if (texIdx.x >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.x)).rgb * weights.x; wsum += weights.x; }
+            if (texIdx.y >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.y)).rgb * weights.y; wsum += weights.y; }
+            if (texIdx.z >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.z)).rgb * weights.z; wsum += weights.z; }
+            if (wsum > 1e-6) texCol /= wsum;
+            else
+            {
+                // fallback to simple average if weights are zero
+                if (texIdx.x >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.x)).rgb; count += 1.0; }
+                if (texIdx.y >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.y)).rgb; count += 1.0; }
+                if (texIdx.z >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.z)).rgb; count += 1.0; }
+                if (count > 0.0) texCol /= count; else texCol = vec3(0.2);
+            }
         }
-        if (texIdx.z >= 0) {
-            texCol += texture(terrainArray, vec3(TexCoord, texIdx.z)).rgb * BlendWeights.z;
-            totalWeight += BlendWeights.z;
+        else // terrainBlendMode == 0 : Average (best so far)
+        {
+            if (texIdx.x >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.x)).rgb; count += 1.0; }
+            if (texIdx.y >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.y)).rgb; count += 1.0; }
+            if (texIdx.z >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.z)).rgb; count += 1.0; }
+            if (count > 0.0) texCol /= count; else texCol = vec3(0.2);
         }
 
-        // Avoid divide-by-zero and normalize only if needed
-        if (totalWeight > 0.0)
-            texCol /= totalWeight;
-        else
-            texCol = vec3(0.2); // fallback dull color to avoid black
+        // Use BlendWeights as a subtle tint (keeps behavior you liked)
+        vec3 tinted = texCol * clamp(BlendWeights.rgb, 0.0, 1.0);
 
-        // Limit the tint effect strictly to balanced range
-        vec3 vertexTint = clamp(mix(vec3(1.0), BlendWeights.rgb, 0.2), 0.8, 1.2);
-
-        // Final dim and color correction
-        vec3 litCol = texCol * vertexTint;
-
-        // LIGHTING
+        // Lighting stays the same
+        vec3 litCol = tinted;
         if (lighting)
         {
-            vec3 N = normalize(Normal);
-            vec3 L = normalize(lightPos - PosWorldSpace); // light direction vector
-            float diff = max(dot(N, L), 0.0);             // measure how aligned the surface is with the light (cos = 1 means the light hits water surface directly)
+            vec3 N = Normal;
+            vec3 L = normalize(lightPos - PosWorldSpace);
+            float diff = max(dot(N, L), 0.0);
 
-            vec3 I = normalize(cameraPos - PosWorldSpace); // view direction vector
-            vec3 R = reflect(-L, N);                       // reflection vector
-            float spec = pow(max(dot(I, R), 0.0), 64.0);   // measure how aligned the view direction is with the reflected light (cos = 1 means the light reflection hits the camera)
+            vec3 ambient = 0.5  * lightColor;
+            vec3 diffuse = 0.4  * lightColor * diff;
 
-            vec3 ambient = ambientStrength  * lightColor;
-            vec3 diffuse = 0.7  * lightColor * diff;
-            //vec3 specular = specularStrength * lightColor * spec;
-
-            litCol = (1.0 + diffuse) * litCol;
+            litCol = (ambient + diffuse) * litCol;
         }
 
-        FragColor = vec4(litCol * 0.85, 1.0); // slightly dimmed
-
-                // int count = 0;
-        // if(texIdx.x >= 0) count++;
-        // if(texIdx.y >= 0) count++;
-        // if(texIdx.z >= 0) count++;
-        // float w = count > 0 ? 1.0/float(count) : 0.0;
-
-        // vec4 col = vec4(0);
-        // if(texIdx.x >= 0) col += w * texture(terrainArray, vec3(TexCoord, texIdx.x));
-        // if(texIdx.y >= 0) col += w * texture(terrainArray, vec3(TexCoord, texIdx.y));
-        // if(texIdx.z >= 0) col += w * texture(terrainArray, vec3(TexCoord, texIdx.z));
-
-        // FragColor = col;  // or mix with edgeColor via bary
-
-        // float minB = min(min(barycentric.x, barycentric.y), barycentric.z); // figure out how “close” we are to an edge
-        // float w = fwidth(minB) * 0.2;      // tweak 1.5 for thicker/thinner
-        // float edgeFactor = smoothstep(w * 0.5, w, minB);
-
-        // FragColor = mix(vec4(0.4f, 0.2f, 0.1f, 1.0f), vec4(0.76f, 0.60f, 0.42f, 1.0f), edgeFactor);
-        //FragColor = texture(modelTexture, TexCoord);
+        FragColor = vec4(litCol * 0.85, 1.0);
     }
     else if (renderMode == 2)
         FragColor = vec4(0.4f, 0.2f, 0.1f, 1.0f);

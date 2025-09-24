@@ -145,6 +145,24 @@ void Terrain::load(const char *fpath, Sound &sound)
 		camera.Pitch = -35.0f;
 		camera.Yaw = -100.0f;
 	}
+	else if (terrainName == "pvp_merciless_ring")
+	{
+		camera.Position = glm::vec3(-40, 50, 400);
+		camera.Pitch = -30.0f;
+		camera.Yaw = -40.0f;
+	}
+	else if (terrainName == "pvp_arena_of_courage")
+	{
+		camera.Position = glm::vec3(110, 130, 230);
+		camera.Pitch = -30.0f;
+		camera.Yaw = -40.0f;
+	}
+	else if (terrainName == "pvp_the_lost_city")
+	{
+		camera.Position = glm::vec3(-280, 70, -330);
+		camera.Pitch = -15.0f;
+		camera.Yaw = -125.0f;
+	}
 	else if (terrainName == "relic's_key")
 	{
 		camera.Position = glm::vec3(-200, 100, 210);
@@ -367,8 +385,14 @@ void Terrain::getTerrainVertices()
 					float y01 = t->Y[row + 1][col];
 					float y11 = t->Y[row + 1][col + 1];
 
-					float u0 = 0.0f, u1 = 1.0f;
-					float v0 = 0.0f, v1 = 1.0f;
+					// <-- minimal change here -->
+					// texture coordinates: match original TRN behavior:
+					// TCoords.X = vx * 0.125f; TCoords.Y = vy * 0.125f
+					float u0 = (float)col * 0.125f;
+					float u1 = (float)(col + 1) * 0.125f;
+					float v0 = (float)row * 0.125f;
+					float v1 = (float)(row + 1) * 0.125f;
+					// <-- end change -->
 
 					int chunkCol = col / 8;
 					int chunkRow = row / 8;
@@ -430,6 +454,7 @@ void Terrain::getTerrainVertices()
 				}
 			}
 
+			/*
 			// load texture(s)
 			int textureCount = (int)t->textureNames.size();
 			std::vector<unsigned char *> pixelData(textureCount);
@@ -490,7 +515,7 @@ void Terrain::getTerrainVertices()
 			}
 
 			// 4) Set filtering/wrap params once on the array
-			glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 			glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 			glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_REPEAT);
 			glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_REPEAT);
@@ -502,6 +527,7 @@ void Terrain::getTerrainVertices()
 			for (auto ptr : pixelData)
 				if (ptr)
 					stbi_image_free(ptr);
+			*/
 
 			// compute vertex count (every vertex = 18 floats)
 			if (t->terrainVertices.empty())
@@ -1325,8 +1351,8 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool rende
 			continue;
 
 		glBindVertexArray(tile->trnVAO);
-		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D_ARRAY, tile->textureMap);
+		// glActiveTexture(GL_TEXTURE0);
+		// glBindTexture(GL_TEXTURE_2D_ARRAY, tile->textureMap);
 		glDrawArrays(GL_TRIANGLES, 0, tile->terrainVertexCount);
 		glBindVertexArray(0);
 	}
@@ -1335,6 +1361,7 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool rende
 	if (renderNavMesh)
 	{
 		shader.setInt("renderMode", 5);
+		shader.setInt("terrainBlendMode", 2);
 
 		for (TileTerrain *tile : tilesVisible)
 		{
