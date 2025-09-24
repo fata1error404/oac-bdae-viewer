@@ -59,19 +59,19 @@ TileTerrain *TileTerrain::load(IReadResFile *trnFile, int &gridX, int &gridZ, Te
 		if (extensionPos != std::string::npos)
 			textureName = textureName.substr(0, extensionPos) + ".png";
 
-		std::cout << textureName << std::endl;
+		// std::cout << textureName << std::endl;
 
 		prevPosition += sizeOfName[i];
 
 		// register texture: check if texture name already exists in the list of unique names (if it doesn't, add it and assign a new index; if it does, reuse the existing index)
-		std::vector<std::string>::iterator foundPos = std::find(terrain.textureNames.begin(), terrain.textureNames.end(), textureName);
-		if (foundPos == terrain.textureNames.end())
+		std::vector<std::string>::iterator foundPos = std::find(tileTerrain->textureNames.begin(), tileTerrain->textureNames.end(), textureName);
+		if (foundPos == tileTerrain->textureNames.end())
 		{
-			terrain.textureNames.push_back(textureName);
-			newTexNameIndex[i] = (int)terrain.textureNames.size() - 1;
+			tileTerrain->textureNames.push_back(textureName);
+			newTexNameIndex[i] = (int)tileTerrain->textureNames.size() - 1;
 		}
 		else
-			newTexNameIndex[i] = (int)std::distance(terrain.textureNames.begin(), foundPos);
+			newTexNameIndex[i] = (int)std::distance(tileTerrain->textureNames.begin(), foundPos);
 	}
 
 	// 4. parse chunk data section, retrieve: textures and other metadata about each chunk

@@ -69,10 +69,17 @@ void Terrain::load(const char *fpath, Sound &sound)
 		}
 	}
 
-	delete terrainArchive;
-	delete itemsArchive;
-	delete navigationArchive;
-	delete physicsArchive;
+	if (terrainArchive)
+		delete terrainArchive;
+
+	if (itemsArchive)
+		delete itemsArchive;
+
+	if (navigationArchive)
+		delete navigationArchive;
+
+	if (physicsArchive)
+		delete physicsArchive;
 
 	/* initialize Class variables inside the Terrain object
 		– terrain borders
@@ -111,42 +118,46 @@ void Terrain::load(const char *fpath, Sound &sound)
 	getNavigationVertices(navMesh);
 
 	// load skybox
-	std::string terrainName = std::filesystem::path(fpath).filename().string();
-	std::string skyboxName = "model/skybox/" + terrainName.replace(terrainName.size() - 4, 4, "") + ".bdae";
-	skybox.load(skyboxName.c_str(), sound, true);
+	std::string terrainFileName = std::filesystem::path(fpath).filename().string();
+	std::string terrainName = terrainFileName.replace(terrainFileName.size() - 4, 4, "");
+	std::string skyName = "model/skybox/" + terrainName + "_sky.bdae";
+	std::string hillName = "model/skybox/" + terrainName + "_hill.bdae";
+
+	sky.load(skyName.c_str(), sound, true);
+	hill.load(hillName.c_str(), sound, true);
 
 	// set camera starting point
-	if (terrainName == "pvp_eristar_ruin")
+	if (terrainName == "pvp_forsaken_shrine")
 	{
 		camera.Position = glm::vec3(-125, 85, 160);
 		camera.Pitch = -50.0f;
 		camera.Yaw = 0.0f;
 	}
-	else if (terrainName == "pvp_on_street")
+	else if (terrainName == "pvp_garrison_quarter")
 	{
 		camera.Position = glm::vec3(95, 70, 250);
 		camera.Pitch = -35.0f;
 		camera.Yaw = -50.0f;
 	}
-	else if (terrainName == "pvp_west_wood")
+	else if (terrainName == "pvp_mephitis_backwoods")
 	{
 		camera.Position = glm::vec3(40, 30, 110);
 		camera.Pitch = -35.0f;
 		camera.Yaw = -100.0f;
 	}
-	else if (terrainName == "swamp_eye")
+	else if (terrainName == "relic's_key")
 	{
 		camera.Position = glm::vec3(-200, 100, 210);
 		camera.Pitch = -25.0f;
 		camera.Yaw = -40.0f;
 	}
-	else if (terrainName == "knahswahs_jail")
+	else if (terrainName == "knahswahs_prison")
 	{
 		camera.Position = glm::vec3(-475, 140, -2050);
 		camera.Pitch = -30.0f;
 		camera.Yaw = -125.0f;
 	}
-	else if (terrainName == "west_land")
+	else if (terrainName == "tanned_land")
 	{
 		camera.Position = glm::vec3(-2600, 120, 195);
 		camera.Pitch = -30.0f;
@@ -419,6 +430,79 @@ void Terrain::getTerrainVertices()
 				}
 			}
 
+			// load texture(s)
+			int textureCount = (int)t->textureNames.size();
+			std::vector<unsigned char *> pixelData(textureCount);
+			int w, h, c, nrChannels = 0;
+
+			for (int i = 0; i < textureCount; ++i)
+			{
+				// normalize slashes
+				std::replace(t->textureNames[i].begin(), t->textureNames[i].end(), '\\', '/');
+
+				const std::string needle = "texture/";
+				const std::string insertStr = "unsorted/";
+
+				size_t pos = t->textureNames[i].find(needle);
+
+				if (pos != std::string::npos)
+				{
+					size_t ins = pos + needle.size();
+					// only insert if "unsorted/" is not already there
+					if (t->textureNames[i].compare(ins, insertStr.size(), insertStr) != 0)
+					{
+						t->textureNames[i].insert(ins, insertStr);
+					}
+				}
+
+				t->textureNames[i] = "data/" + t->textureNames[i];
+
+				pixelData[i] = stbi_load(t->textureNames[i].c_str(), &w, &h, &c, 4);
+				if (!pixelData[i])
+				{
+					std::cout << "Failed to load texture: " << t->textureNames[i] << "\n";
+					continue;
+				}
+			}
+
+			glGenTextures(1, &t->textureMap);
+			glBindTexture(GL_TEXTURE_2D_ARRAY, t->textureMap);
+
+			// Allocate storage: 1 mip level, RGBA8, width x height, depth = textureCount
+			glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, GL_RGBA8, w, h, textureCount);
+
+			// 3) Upload each image into its layer
+			for (int i = 0; i < textureCount; ++i)
+			{
+				if (pixelData[i])
+				{
+					glTexSubImage3D(
+						GL_TEXTURE_2D_ARRAY,
+						0,		 // mip level
+						0, 0, i, // x, y, layer
+						w,
+						h,
+						1, // depth = 1 slice
+						GL_RGBA,
+						GL_UNSIGNED_BYTE,
+						pixelData[i]);
+				}
+			}
+
+			// 4) Set filtering/wrap params once on the array
+			glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_REPEAT);
+			glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+			// generate mipmaps (optional if you allocated >1 level)
+			glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
+
+			// free CPU image data
+			for (auto ptr : pixelData)
+				if (ptr)
+					stbi_image_free(ptr);
+
 			// compute vertex count (every vertex = 18 floats)
 			if (t->terrainVertices.empty())
 				t->terrainVertexCount = 0;
@@ -480,11 +564,17 @@ void Terrain::getWaterVertices()
 // Load Nav Mesh if exists
 void Terrain::loadTileNavigation(CZipResReader *navigationArchive, dtNavMesh *navMesh, int gridX, int gridZ)
 {
+	if (!navigationArchive)
+		return;
+
+	if (navigationArchive->getFileCount() == 0)
+		return;
+
 	char tmpName[256];
 
 #ifdef BETA_GAME_VERSION
 	std::string terrainName = std::filesystem::path(navigationArchive->getZipFileName()).stem().string();
-	sprintf(tmpName, "world/%s/navmesh/%04d_%04d.nav", terrainName.c_str(), gridX, gridZ); // path inside the .nav archive
+	sprintf(tmpName, "%04d_%04d.nav", gridX, gridZ); // path inside the .nav archive
 #else
 	sprintf(tmpName, "navmesh/%04d_%04d.nav", gridX, gridZ); // [TODO] test!
 #endif
@@ -1018,7 +1108,8 @@ void Terrain::reset()
 		for (TileTerrain *tile : column)
 			delete tile;
 
-	skybox.reset();
+	sky.reset();
+	hill.reset();
 
 	tiles.clear();
 	tilesVisible.clear();
@@ -1234,6 +1325,8 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool rende
 			continue;
 
 		glBindVertexArray(tile->trnVAO);
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D_ARRAY, tile->textureMap);
 		glDrawArrays(GL_TRIANGLES, 0, tile->terrainVertexCount);
 		glBindVertexArray(0);
 	}
@@ -1310,9 +1403,12 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool rende
 	// render skybox
 	if (!simple)
 	{
+		glDepthMask(GL_FALSE);
 		glDepthFunc(GL_LEQUAL);
-		skybox.draw(glm::mat4(1.0f), glm::mat4(glm::mat3(view)), projection, camera.Position, false, false);
+		sky.draw(glm::mat4(1.0f), glm::mat4(glm::mat3(view)), projection, camera.Position, false, false);
+		hill.draw(glm::mat4(1.0f), glm::mat4(glm::mat3(view)), projection, camera.Position, false, false);
 		glDepthFunc(GL_LESS);
+		glDepthMask(GL_TRUE);
 	}
 
 	glBindVertexArray(0);

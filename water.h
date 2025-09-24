@@ -11,6 +11,9 @@
 const float waterTextureSpeed = 0.5f;
 const float waterTextureScale = 0.8f;
 
+// Class for loading water.
+// ________________________
+
 class Water
 {
   public:

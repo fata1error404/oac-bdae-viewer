@@ -31,7 +31,8 @@ class Terrain
 	Shader shader;
 	Camera &camera;
 	Light &light;
-	Model skybox;
+	Model sky;
+	Model hill;
 	std::string fileName;
 	int fileSize, vertexCount, faceCount, modelCount;
 	std::vector<std::string> sounds;
@@ -42,11 +43,10 @@ class Terrain
 	int tilesX, tilesZ;							   // terrain size in tiles
 	bool terrainLoaded;
 
-	std::vector<std::string> textureNames;
-
 	Terrain(Camera &cam, Light &light)
 		: shader("shaders/terrain.vs", "shaders/terrain.fs"),
-		  skybox("shaders/skybox.vs", "shaders/skybox.fs"),
+		  sky("shaders/skybox.vs", "shaders/skybox.fs"),
+		  hill("shaders/skybox.vs", "shaders/skybox.fs"),
 		  camera(cam),
 		  light(light),
 		  vertexCount(0), faceCount(0), modelCount(0),
