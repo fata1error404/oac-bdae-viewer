@@ -1,4 +1,6 @@
 #version 330 core
+// [TODO] annotate
+
 layout (location = 0) in vec3 aPos;
 layout (location = 1) in vec3 aBary;
 layout (location = 2) in vec2 aTexCoord;
@@ -26,7 +28,6 @@ void main()
     BlendWeights  = aBlend;
     Normal = mat3(transpose(inverse(model))) * aNormal;
 
-    // store barycentric multiplied by clip-space w
     barycentric = aBary * clipPos.w;
     TexCoord = aTexCoord;
 }

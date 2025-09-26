@@ -18,26 +18,23 @@ uniform float specularStrength;
 
 void main()
 {
-    // base water
     vec4 baseColor = texture(waterTexture, TexCoord);
     vec3 result = baseColor.rgb;
 
     vec3 N = normalize(Normal);
-    vec3 I = normalize(cameraPos - PosWorldSpace); // view direction vector
-    vec3 R = reflect(-I, N);                       // reflection vector
+    vec3 I = normalize(cameraPos - PosWorldSpace);
+    vec3 R = reflect(-I, N);
 
-    // lighting (Phong lighting model: ambient + diffuse + specular)
     if (lighting)
     {
-        vec3 L = normalize(lightPos - PosWorldSpace); // light direction vector
-        float diff = max(dot(N, L), 0.0);             // measure how aligned the surface is with the light (cos = 1 means the light hits water surface directly)
+        vec3 L = normalize(lightPos - PosWorldSpace);
+        float diff = max(dot(N, L), 0.0);
 
         vec3 R = reflect(-L, N);
-        float spec = pow(max(dot(I, R), 0.0), 64.0); // measure how aligned the view direction is with the reflected light (cos = 1 means the light reflection hits the camera)
+        float spec = pow(max(dot(I, R), 0.0), 64.0);
 
         vec3 ambient = ambientStrength  * lightColor;
-        vec3 diffuse = diffuseStrength  * lightColor * diff; // apply diffuse lighting only if the fragment is not in shadow (this allows for rendering shadowed areas)
-
+        vec3 diffuse = diffuseStrength  * lightColor * diff;
         vec3 specular = specularStrength * lightColor * spec;
 
         result = (ambient + diffuse + specular) * result;

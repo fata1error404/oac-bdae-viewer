@@ -13,6 +13,8 @@
 #include "libs/glm/gtc/type_precision.hpp"
 #include "parserITM.h"
 
+// [TODO] annotate
+
 //! Loads .zip file from disk, performs parsing for each contained .trn file, sets up terrain mesh data and sound.
 void Terrain::load(const char *fpath, Sound &sound)
 {
@@ -280,18 +282,10 @@ void Terrain::uploadToGPU(TileTerrain *tile)
 	}
 }
 
-// Helper: safely delete GPU resources for a tile, but keep CPU-side data.
-// This will NOT delete the TileTerrain* itself.
 void Terrain::releaseFromGPU(TileTerrain *tile)
 {
 	if (!tile)
 		return;
-
-	// Unbind VAO if currently bound and equals this tile's VAO
-	// GLint curVAO = 0;
-	// glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &curVAO);
-	// if ((GLuint)curVAO == tile->trnVAO)
-	// 	glBindVertexArray(0);
 
 	if (tile->trnVAO)
 	{
@@ -337,7 +331,6 @@ void Terrain::releaseFromGPU(TileTerrain *tile)
 		tile->water.VBO = 0;
 	}
 
-	// If models have GPU resources managed per-model, optionally call their unload:
 	// for (auto &m : tile->models)
 	// {
 	// 	if (m)
@@ -619,7 +612,6 @@ void Terrain::loadTileNavigation(CZipResReader *navigationArchive, dtNavMesh *na
 	int tileRef = navMesh->addTile(buffer, fileSize, DT_TILE_FREE_DATA, 0); // register in navigation system, granting Detour in-memory ownership (buffer will be freed automatically when the tile is destroyed)
 }
 
-// [TODO] annotate
 #include <unordered_map>
 #include <string>
 #include <tuple>
@@ -627,13 +619,13 @@ void Terrain::loadTileNavigation(CZipResReader *navigationArchive, dtNavMesh *na
 #include <cmath>
 #include <sstream>
 
-// Helper: quantize a coordinate to integer to avoid tiny floating differences.
+// helper: quantize a coordinate to integer to avoid tiny floating differences.
 static inline long long quantizeCoord(float v, float scale = 1000.0f)
 {
 	return llround(v * scale);
 }
 
-// Make a canonical undirected edge key based on quantized endpoints.
+// make a canonical undirected edge key based on quantized endpoints.
 static inline std::string makeEdgeKeyQ(float ax, float ay, float az, float bx, float by, float bz, float scale = 1000.0f)
 {
 	long long a0 = quantizeCoord(ax, scale);
@@ -686,7 +678,6 @@ void Terrain::getNavigationVertices(dtNavMesh *navMesh)
 		const float *verts = dTile->verts;
 		int polyCount = hdr->polyCount;
 
-		// Temporary per-detour-tile buffers
 		std::vector<float> tileNavVerts;
 		tileNavVerts.reserve(polyCount * 9 * 2); // rough reserve: 3 verts per tri, 3 floats per vert
 
@@ -696,7 +687,7 @@ void Terrain::getNavigationVertices(dtNavMesh *navMesh)
 		std::unordered_map<std::string, EdgeInfo> edgeMap;
 		edgeMap.reserve(512);
 
-		// Scan polygons in this detour tile
+		// scan polygons in this detour tile
 		for (int p = 0; p < polyCount; ++p)
 		{
 			const dtPoly &poly = dTile->polys[p];
@@ -807,31 +798,7 @@ void Terrain::getNavigationVertices(dtNavMesh *navMesh)
 				// move new vertices into the tile
 				t->navigationVertices = std::move(tileNavVerts);
 				t->navmeshVertexCount = triVertexCounter;
-
-				// upload GL buffers for this tile
-				if (!t->navigationVertices.empty())
-				{
-					// glGenVertexArrays(1, &t->navVAO);
-					// glGenBuffers(1, &t->navVBO);
-					// glBindVertexArray(t->navVAO);
-					// glBindBuffer(GL_ARRAY_BUFFER, t->navVBO);
-					// GLsizeiptr bufSize = (GLsizeiptr)(t->navigationVertices.size() * sizeof(float));
-					// glBufferData(GL_ARRAY_BUFFER, bufSize, t->navigationVertices.data(), GL_STATIC_DRAW);
-					// glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
-					// glEnableVertexAttribArray(0);
-					// glBindVertexArray(0);
-				}
 			}
-			else
-			{
-				// Tile not present in memory: we still generated tileNavVerts (since navMesh had the tile)
-				// Optionally: keep a small cache / discard. Here we simply drop it.
-			}
-		}
-		else
-		{
-			// header x/y outside bounds of loaded tiles or tileMin/tileMax not set yet.
-			// We can drop tileNavVerts or store elsewhere if desired.
 		}
 	}
 
@@ -845,7 +812,6 @@ void Terrain::getNavigationVertices(dtNavMesh *navMesh)
 //! Returns a single vector partitioned into [0…fillVerts) = triangles, [fillVerts…end) = lines.
 void Terrain::getPhysicsVertices()
 {
-	// first, accumulate *only* triangles
 	for (int i = 0; i < tilesX; i++)
 	{
 		for (int j = 0; j < tilesZ; j++)
@@ -855,14 +821,12 @@ void Terrain::getPhysicsVertices()
 			if (!tile || tile->physicsGeometry.empty())
 				continue;
 
-			// iterate every head in the physicsGeometry vector, and then traverse its linked list (pNext)
 			for (Physics *headGeom : tile->physicsGeometry)
 			{
 				for (Physics *geom = headGeom; geom; geom = geom->pNext)
 				{
 					int type = geom->geometryType;
 
-					// --- BOX: emit 12 tris (6 faces × 2) ---
 					if (type == PHYSICS_GEOM_TYPE_BOX)
 					{
 						VEC3 &h = geom->halfSize;
@@ -870,18 +834,15 @@ void Terrain::getPhysicsVertices()
 							{-h.X, +h.Y, -h.Z}, {+h.X, +h.Y, -h.Z}, {+h.X, -h.Y, -h.Z}, {-h.X, -h.Y, -h.Z}, {-h.X, +h.Y, +h.Z}, {+h.X, +h.Y, +h.Z}, {+h.X, -h.Y, +h.Z}, {-h.X, -h.Y, +h.Z}};
 						for (auto &vv : v)
 							geom->model.transformVect(vv);
-						// correct faces: front, back, left, right, top, bottom
 						int F[6][4] = {
 							{0, 1, 2, 3}, {5, 4, 7, 6}, {0, 3, 7, 4}, {1, 5, 6, 2}, {0, 4, 5, 1}, {3, 2, 6, 7}};
 						for (int f = 0; f < 6; ++f)
 						{
 							int a = F[f][0], b = F[f][1], c = F[f][2], d = F[f][3];
-							// tri1 (a,b,c), tri2 (a,c,d)
 							tile->physicsVertices.insert(tile->physicsVertices.end(), {v[a].X, v[a].Y, v[a].Z, v[b].X, v[b].Y, v[b].Z, v[c].X, v[c].Y, v[c].Z,
 																					   v[a].X, v[a].Y, v[a].Z, v[c].X, v[c].Y, v[c].Z, v[d].X, v[d].Y, v[d].Z});
 						}
 					}
-					// --- CYLINDER (unchanged) ---
 					else if (type == PHYSICS_GEOM_TYPE_CYLINDER)
 					{
 						const int CUT_NUM = 16;
@@ -892,7 +853,6 @@ void Terrain::getPhysicsVertices()
 
 						int myoffset = 0.5 * radius;
 
-						// Local center points
 						VEC3 centerBottom(myoffset, -height, -myoffset);
 						VEC3 centerTop(myoffset, height, -myoffset);
 						geom->model.transformVect(centerBottom);
@@ -906,29 +866,24 @@ void Terrain::getPhysicsVertices()
 							float x0 = radius * cosf(angle0) + myoffset, z0 = radius * sinf(angle0) - myoffset;
 							float x1 = radius * cosf(angle1) + myoffset, z1 = radius * sinf(angle1) - myoffset;
 
-							// Local space points
 							VEC3 b0(x0, -height, z0);
 							VEC3 b1(x1, -height, z1);
 							VEC3 t0(x0, +height, z0);
 							VEC3 t1(x1, +height, z1);
 
-							// Transform to world
 							geom->model.transformVect(b0);
 							geom->model.transformVect(b1);
 							geom->model.transformVect(t0);
 							geom->model.transformVect(t1);
 
-							// --- Bottom Cap (CCW when viewed from below)
 							tile->physicsVertices.insert(tile->physicsVertices.end(), {b1.X, b1.Y, b1.Z,
 																					   b0.X, b0.Y, b0.Z,
 																					   centerBottom.X, centerBottom.Y, centerBottom.Z});
 
-							// --- Top Cap (CCW when viewed from above)
 							tile->physicsVertices.insert(tile->physicsVertices.end(), {t0.X, t0.Y, t0.Z,
 																					   t1.X, t1.Y, t1.Z,
 																					   centerTop.X, centerTop.Y, centerTop.Z});
 
-							// --- Side Face (two triangles)
 							tile->physicsVertices.insert(tile->physicsVertices.end(), {b0.X, b0.Y, b0.Z,
 																					   t0.X, t0.Y, t0.Z,
 																					   t1.X, t1.Y, t1.Z});
@@ -938,11 +893,8 @@ void Terrain::getPhysicsVertices()
 																					   b1.X, b1.Y, b1.Z});
 						}
 					}
-
-					// --- MESH: emit each face as one triangle ---
 					else if (type == PHYSICS_GEOM_TYPE_MESH)
 					{
-						// try local vectors first, fallback на cached buffers
 						const auto *facePtr = geom->mesh ? &geom->mesh->second : nullptr;
 						const auto *vertPtr = geom->mesh ? &geom->mesh->first : nullptr;
 
@@ -954,7 +906,6 @@ void Terrain::getPhysicsVertices()
 						const auto &face = *facePtr;
 						const auto &vert = *vertPtr;
 
-						// safety: check bounds optionally
 						for (int f = 0; f < F; ++f)
 						{
 							int a = face[4 * f];
@@ -973,16 +924,13 @@ void Terrain::getPhysicsVertices()
 							geom->model.transformVect(v1);
 							geom->model.transformVect(v2);
 
-							// Fix winding after mirroring: v0 → v2 → v1
 							tile->physicsVertices.insert(tile->physicsVertices.end(), {v0.X, v0.Y, v0.Z,
 																					   v2.X, v2.Y, v2.Z,
 																					   v1.X, v1.Y, v1.Z});
 						}
 					}
-				} // end traverse linked list
-			} // end iterate heads
-
-			// mark where the triangle section ends
+				}
+			}
 			tile->physicsVertexCount = tile->physicsVertices.size() / 3;
 		}
 	}
@@ -995,13 +943,11 @@ void Terrain::getPhysicsVertices()
 
 			TileTerrain *tile = tiles[i][j];
 
-			// iterate every head in the physicsGeometry vector, and then traverse its linked list (pNext)
 			for (Physics *headGeom : tile->physicsGeometry)
 			{
 				for (Physics *geom = headGeom; geom; geom = geom->pNext)
 				{
 					int type = geom->geometryType;
-					// BOX edges
 					if (type == PHYSICS_GEOM_TYPE_BOX)
 					{
 						VEC3 &h = geom->halfSize;
@@ -1017,7 +963,6 @@ void Terrain::getPhysicsVertices()
 																					   v[e[1]].X, v[e[1]].Y, v[e[1]].Z});
 						}
 					}
-					// CYLINDER edges
 					else if (type == PHYSICS_GEOM_TYPE_CYLINDER)
 					{
 						const int CUT_NUM = 16;
@@ -1028,7 +973,6 @@ void Terrain::getPhysicsVertices()
 
 						int myoffset = 0.5 * radius;
 
-						// Local center points
 						VEC3 centerBottom(myoffset, -height, -myoffset);
 						VEC3 centerTop(myoffset, height, -myoffset);
 						geom->model.transformVect(centerBottom);
@@ -1052,7 +996,6 @@ void Terrain::getPhysicsVertices()
 							geom->model.transformVect(b1);
 							geom->model.transformVect(t1);
 
-							// --- Bottom Cap (CCW from below)
 							tile->physicsVertices.insert(tile->physicsVertices.end(), {b1.X, b1.Y, b1.Z,
 																					   b0.X, b0.Y, b0.Z,
 																					   centerBottom.X, centerBottom.Y, centerBottom.Z});
@@ -1061,18 +1004,15 @@ void Terrain::getPhysicsVertices()
 																					   t1.X, t1.Y, t1.Z,
 																					   b1.X, b1.Y, b1.Z});
 
-							// --- Side Face
 							tile->physicsVertices.insert(tile->physicsVertices.end(), {b0.X, b0.Y, b0.Z,
 																					   t0.X, t0.Y, t0.Z,
 																					   t1.X, t1.Y, t1.Z});
 
-							// --- Top Cap (CCW from above)
 							tile->physicsVertices.insert(tile->physicsVertices.end(), {t0.X, t0.Y, t0.Z,
 																					   t1.X, t1.Y, t1.Z,
 																					   centerTop.X, centerTop.Y, centerTop.Z});
 						}
 					}
-					// MESH edges
 					else if (type == PHYSICS_GEOM_TYPE_MESH)
 					{
 						const auto *facePtr = geom->mesh ? &geom->mesh->second : nullptr;
@@ -1103,15 +1043,13 @@ void Terrain::getPhysicsVertices()
 							geom->model.transformVect(v1);
 							geom->model.transformVect(v2);
 
-							// Fix winding after mirroring: write triangles (v0,v2,v2), (v2,v1,v1), (v1,v0,v0) ?
-							// (your previous code produced a 4-triangle strip — keep original mapping below)
 							tile->physicsVertices.insert(tile->physicsVertices.end(), {v0.X, v0.Y, v0.Z, v2.X, v2.Y, v2.Z,
 																					   v2.X, v2.Y, v2.Z, v1.X, v1.Y, v1.Z,
 																					   v1.X, v1.Y, v1.Z, v0.X, v0.Y, v0.Z});
 						}
 					}
-				} // end traverse linked list
-			} // end iterate heads
+				}
+			}
 
 			for (Physics *p : tile->physicsGeometry)
 				delete p;

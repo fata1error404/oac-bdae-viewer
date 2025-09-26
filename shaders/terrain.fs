@@ -1,4 +1,5 @@
 #version 330 core
+// [TODO] annotate
 
 in vec3 PosWorldSpace;
 in vec3 barycentric;
@@ -27,11 +28,10 @@ void main()
     {
         vec3 texCol = vec3(0.0);
         float count = 0.0;
-        vec3 weights = max(vec3(0.0), BlendWeights.rgb); // ensure non-negative
+        vec3 weights = max(vec3(0.0), BlendWeights.rgb);
 
-        if (terrainBlendMode == 2) // Dominant: pick texture with largest weight (or fallback to average)
+        if (terrainBlendMode == 2)
         {
-            // find index of max weight among present textures
             int bestIdx = -1;
             float bestW = -1.0;
             if (texIdx.x >= 0 && weights.x > bestW) { bestW = weights.x; bestIdx = texIdx.x; }
@@ -44,14 +44,13 @@ void main()
             }
             else
             {
-                // fallback average
                 if (texIdx.x >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.x)).rgb; count += 1.0; }
                 if (texIdx.y >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.y)).rgb; count += 1.0; }
                 if (texIdx.z >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.z)).rgb; count += 1.0; }
                 if (count > 0.0) texCol /= count; else texCol = vec3(0.2);
             }
         }
-        else if (terrainBlendMode == 1) // Weighted: use BlendWeights as mixing weights
+        else if (terrainBlendMode == 1)
         {
             float wsum = 0.0;
             if (texIdx.x >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.x)).rgb * weights.x; wsum += weights.x; }
@@ -60,14 +59,13 @@ void main()
             if (wsum > 1e-6) texCol /= wsum;
             else
             {
-                // fallback to simple average if weights are zero
                 if (texIdx.x >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.x)).rgb; count += 1.0; }
                 if (texIdx.y >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.y)).rgb; count += 1.0; }
                 if (texIdx.z >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.z)).rgb; count += 1.0; }
                 if (count > 0.0) texCol /= count; else texCol = vec3(0.2);
             }
         }
-        else // terrainBlendMode == 0 : Average (best so far)
+        else // best so far
         {
             if (texIdx.x >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.x)).rgb; count += 1.0; }
             if (texIdx.y >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.y)).rgb; count += 1.0; }
@@ -75,10 +73,8 @@ void main()
             if (count > 0.0) texCol /= count; else texCol = vec3(0.2);
         }
 
-        // Use BlendWeights as a subtle tint (keeps behavior you liked)
         vec3 tinted = texCol * clamp(BlendWeights.rgb, 0.0, 1.0);
 
-        // Lighting stays the same
         vec3 litCol = tinted;
         if (lighting)
         {
@@ -107,5 +103,5 @@ void main()
     else if (renderMode == 4)
         FragColor = vec4(0.73f, 0.58f, 0.40f, 0.9f);
     else if (renderMode == 5)
-        FragColor = vec4(0.59f, 0.29f, 0.0f, 0.5f); // brown with alpha
+        FragColor = vec4(0.59f, 0.29f, 0.0f, 0.5f);
 }

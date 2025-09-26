@@ -16,7 +16,7 @@ uniform float textureScale;
 void main()
 {
     PosWorldSpace = vec3(model * vec4(aPos, 1.0));
-    Normal = mat3(transpose(inverse(model))) * aNormal;              // apply normal matrix to ..
+    Normal = aNormal;
     TexCoord = aTexCoord * textureScale + vec2(textureOffset, 0.0);  // animate water by offsetting texture coordinates horizontally
     gl_Position = projection * view * vec4(PosWorldSpace, 1.0);
 }

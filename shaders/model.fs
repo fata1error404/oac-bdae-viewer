@@ -1,14 +1,22 @@
+// .fs = fragment shader; executed on each fragment 
 #version 330 core
 
+/* 
+ fragment comes from 1 triangle (or other geometric primitive passed in glDrawElements): 
+  - 3 vertices of the triangle provide attributes
+  - GPU interpolates attributes across triangle’s surface
+  - for each pixel the triangle covers, rasterizer produces one fragment
+*/
+
+// input from vertex shader
 in vec3 PosWorldSpace;
 in vec3 Normal;
 in vec2 TexCoord;
 
-out vec4 FragColor;
-
+// input from application (same for all fragments within single draw call)
 uniform vec3 cameraPos;
 uniform sampler2D modelTexture;
-uniform int renderMode;
+uniform int renderMode; // 1 = textured, 2 = wireframe (mesh edges), 3 = mesh faces
 
 uniform bool lighting;
 uniform vec3 lightPos;
@@ -17,20 +25,26 @@ uniform float ambientStrength;
 uniform float diffuseStrength;
 uniform float specularStrength;
 
+// output
+out vec4 FragColor;
+
 void main()
 {
     if (renderMode == 1)
     {
+        // sample base color from texture using interpolated u-v coordinates
         vec4 baseColor = texture(modelTexture, TexCoord);
 
+        // discard nearly transparent fragments
         if (baseColor.a < 0.1)
             discard;
 
         vec3 result = baseColor.rgb;
 
+        // lighting (Phong lighting model: ambient + diffuse + specular)
         if (lighting)
         {
-            vec3 N = normalize(Normal);
+            vec3 N = normalize(Normal);                   // surface normal
             vec3 L = normalize(lightPos - PosWorldSpace); // light direction vector
             float diff = max(dot(N, L), 0.0);             // measure how aligned the surface is with the light (cos = 1 means the light hits water surface directly)
 
