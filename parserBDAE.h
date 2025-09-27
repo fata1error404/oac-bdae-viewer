@@ -84,13 +84,13 @@ class Model
 
 	Model(const char *vertex, const char *fragment)
 		: shader(vertex, fragment),
-		  VAO(0),
-		  VBO(0),
+		  VAO(0), VBO(0),
 		  modelLoaded(false),
 		  meshCenter(glm::vec3(-1.0f)),
 		  DataBuffer(NULL)
 	{
 		shader.use();
+		shader.setInt("modelTexture", 0);
 		shader.setVec3("lightPos", lightPos);
 		shader.setVec3("lightColor", lightColor);
 		shader.setFloat("ambientStrength", ambientStrength);

@@ -64,8 +64,8 @@ enum
 	TRNF_ISHOLE = 1 << 17,
 };
 
-// Class for loading terrain tiles.
-// ________________________________
+// Class for loading terrain tile.
+// _______________________________
 
 class TileTerrain
 {
@@ -75,13 +75,13 @@ class TileTerrain
 	std::vector<float> terrainVertices, navigationVertices, physicsVertices; // vertex data
 	std::vector<Physics *> physicsGeometry;									 // .phy models
 	std::vector<std::pair<std::shared_ptr<Model>, glm::mat4>> models;		 // .bdae models
-	std::vector<int> textureIndices;										 // ..
-	unsigned int textureMap;												 // ..
-	unsigned int maskTexture;
-	Water water; // water surface
+	unsigned int textureMap;												 // .trn textures
+	unsigned int maskTexture;												 // .msk + .shw mask layers texture
+	Water water;															 // water surface
 
+	std::vector<int> textureIndices;				 // indices of all tile's texture names in terrain's global list
 	float startX, startZ;							 // position on the grid in world space coordinates
-	float Y[UnitsInTileRow + 1][UnitsInTileCol + 1]; // height map (unscaled)
+	float Y[UnitsInTileRow + 1][UnitsInTileCol + 1]; // height map
 	AABB BBox;										 // bounding box
 
 	ChunkInfo chunks[ChunksInTile];
@@ -96,7 +96,9 @@ class TileTerrain
 		  phyVAO(0), phyVBO(0),
 		  terrainVertexCount(0),
 		  navmeshVertexCount(0),
-		  physicsVertexCount(0)
+		  physicsVertexCount(0),
+		  textureMap(0),
+		  maskTexture(0)
 	{
 		memset(&chunks, 0, sizeof(chunks));
 		memset(&Y, 0, sizeof(Y));
@@ -111,10 +113,10 @@ class TileTerrain
 		glDeleteBuffers(1, &navVBO);
 		glDeleteBuffers(1, &phyVBO);
 
-		if (!textureIndices.empty())
+		if (textureMap)
 		{
 			glDeleteTextures(1, &textureMap);
-			textureIndices.clear();
+			textureMap = 0;
 		}
 
 		if (maskTexture)
@@ -130,6 +132,7 @@ class TileTerrain
 		terrainVertices.clear();
 		navigationVertices.clear();
 		physicsVertices.clear();
+		textureIndices.clear();
 
 		models.clear();
 

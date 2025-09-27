@@ -12,28 +12,28 @@ uniform mat4 projection;
 uniform mat4 view;
 uniform mat4 model;
 
-out vec3 barycentric;
+out vec3 PosWorldSpace;
 out vec3 Normal;
 out vec2 TexCoord1;
 out vec2 TexCoord2;
-out vec4 BlendWeights;
-out vec3 PosWorldSpace;
-
-out float texIdx1;
-out float texIdx2;
-out float texIdx3;
+out float TexIdx1;
+out float TexIdx2;
+out float TexIdx3;
+out vec4 TexBlendWeights;
+out vec3 Barycentric;
 
 void main()
 {
     PosWorldSpace = vec3(model * vec4(aPos, 1.0));
-    vec4 clipPos = projection * view * model * vec4(aPos, 1.0);
-    texIdx1 = aTexIdx.x;
-    texIdx2 = aTexIdx.y; 
-    texIdx3 = aTexIdx.z; 
-    Normal = mat3(transpose(inverse(model))) * aNormal;
+    Normal = aNormal;
     TexCoord1 = aTexCoord1;
     TexCoord2 = aTexCoord2;
-    BlendWeights  = aColor;
-    barycentric = aBary * clipPos.w;
+    TexIdx1 = aTexIdx.x;
+    TexIdx2 = aTexIdx.y; 
+    TexIdx3 = aTexIdx.z; 
+    TexBlendWeights = aColor;
+
+    vec4 clipPos = projection * view * model * vec4(aPos, 1.0);
+    Barycentric = aBary * clipPos.w;
     gl_Position = clipPos;
 }

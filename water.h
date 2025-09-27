@@ -28,7 +28,8 @@ class Water
 		: shader("shaders/water.vs", "shaders/water.fs"),
 		  waterOffset(0.0f),
 		  waterVertexCount(0),
-		  VAO(0), VBO(0)
+		  VAO(0), VBO(0),
+		  texture(0)
 	{
 		shader.use();
 		shader.setInt("waterTexture", 0);

@@ -11,8 +11,8 @@ const glm::vec3 lightColor(1.0f);			  // white color
 const float ambientStrength = 0.5f;
 const float diffuseStrength = 0.6f;
 const float specularStrength = 0.5f;
-const float waterAmbientStrength = 0.8f;
-const float waterDiffuseStrength = 0.9f;
+const float waterAmbientStrength = 0.2f;
+const float waterDiffuseStrength = 0.5f;
 const float waterSpecularStrength = 0.5f;
 
 class Light

@@ -481,8 +481,6 @@ void Terrain::getTerrainVertices()
 
 					texIdx3 = globalToLayer[chunk.texNameIndex3];
 
-					std::cout << texIdx1 << " " << texIdx2 << " " << texIdx3 << std::endl;
-
 					auto unpack_blend = [](glm::u8vec4 rgba) -> std::array<float, 4>
 					{
 						return {
@@ -638,82 +636,83 @@ void Terrain::loadTileMasks(CZipResReader *masksArchive, int gridX, int gridZ, T
 	constexpr int MASK_MAP_RESOLUTION = 256;
 	const int expectedSize = MASK_MAP_RESOLUTION * MASK_MAP_RESOLUTION;
 
-	// Load _0
-	char name0[256];
+	// helper to read file into a buffer (returns true if successful)
+	auto readFileToBuf = [&](const char *name, std::vector<unsigned char> &outBuf) -> bool
+	{
+		IReadResFile *f = masksArchive->openFile(name);
+		if (!f)
+			return false;
+		int sz = (int)f->getSize();
+		if (sz != expectedSize)
+		{
+			std::cout << "[Warning] " << name << " unexpected size: " << sz << " (expected " << expectedSize << ")\n";
+			f->drop();
+			return false;
+		}
+		outBuf.resize(expectedSize);
+		f->read(outBuf.data(), expectedSize);
+		f->drop();
+		return true;
+	};
+
+	char name0[256], name1[256], shwName[256];
 	sprintf(name0, "%04d_%04d_0.msk", gridX, gridZ);
-	IReadResFile *f0 = masksArchive->openFile(name0);
-	if (!f0)
-		return;
-
-	int size0 = (int)f0->getSize();
-	if (size0 != expectedSize)
-	{
-		std::cout << "[Warning] .msk0 unexpected size\n";
-		f0->drop();
-		return;
-	}
-
-	std::vector<unsigned char> buf0(size0);
-	f0->read(buf0.data(), size0);
-	f0->drop();
-
-	// Try to load _1 — if missing, fill with zeros
-	char name1[256];
 	sprintf(name1, "%04d_%04d_1.msk", gridX, gridZ);
-	IReadResFile *f1 = masksArchive->openFile(name1);
+	sprintf(shwName, "%04d_%04d.shw", gridX, gridZ);
 
-	std::vector<unsigned char> buf1(expectedSize, 0); // default zero
-	if (f1)
+	// read primary mask (_0) — required
+	std::vector<unsigned char> buf0;
+	if (!readFileToBuf(name0, buf0))
 	{
-		int size1 = (int)f1->getSize();
-		if (size1 == expectedSize)
-		{
-			f1->read(buf1.data(), size1);
-		}
-		else
-		{
-			std::cout << "[Warning] .msk1 unexpected size or corrupted for tile " << gridX << "," << gridZ << std::endl;
-			// keep buf1 as zeros
-		}
-		f1->drop();
-	}
-	else
-	{
-		// file _1 not found -> treat as zeros
+		// required file missing or wrong size — bail out
+		std::cout << "[Warning] missing or invalid primary mask " << name0 << " for tile " << gridX << "," << gridZ << std::endl;
+		return;
 	}
 
-	// Pack into RGB (R = buf0, G = buf1, B = 0)
+	// read secondary mask (_1), optional (filled with zeros if missing/invalid)
+	std::vector<unsigned char> buf1(expectedSize, 0);
+	if (!readFileToBuf(name1, buf1))
+	{
+		// missing or invalid is OK; buf1 stays zero
+		// std::cout << "[Info] secondary mask not found for tile, using zeros\n";
+	}
+
+	// read shadow mask (.shw), optional (filled with zeros if missing/invalid)
+	std::vector<unsigned char> bufShw(expectedSize, 0);
+	if (!readFileToBuf(shwName, bufShw))
+	{
+		// missing is OK; bufShw stays zero
+		// std::cout << "[Info] shadow mask not found for tile, using zeros\n";
+	}
+
+	// Pack R = buf0, G = buf1, B = bufShw
 	std::vector<unsigned char> rgb;
 	rgb.resize(expectedSize * 3);
 	for (int i = 0; i < expectedSize; ++i)
 	{
-		rgb[3 * i + 0] = buf0[i]; // R
-		rgb[3 * i + 1] = buf1[i]; // G
-		rgb[3 * i + 2] = 0;		  // B
+		rgb[3 * i + 0] = buf0[i];	// R = mask0
+		rgb[3 * i + 1] = buf1[i];	// G = mask1
+		rgb[3 * i + 2] = bufShw[i]; // B = shadow mask
 	}
 
 	// Upload to GL
 	glGenTextures(1, &tile->maskTexture);
 	glBindTexture(GL_TEXTURE_2D, tile->maskTexture);
 
-	// make sure no row alignment surprises
-	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-
-	// Use RGB8 internal format and upload RGB data
+	// RGB8 internal format, upload RGB data
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, MASK_MAP_RESOLUTION, MASK_MAP_RESOLUTION, 0, GL_RGB, GL_UNSIGNED_BYTE, rgb.data());
 
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	// parameters
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); // or GL_LINEAR_MIPMAP_LINEAR if you generate mipmaps
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-	// optional: restore default alignment if you changed it globally elsewhere
-	glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
 
 	// free CPU buffers
 	rgb.clear();
 	buf0.clear();
 	buf1.clear();
+	bufShw.clear();
 }
 
 // Load Nav Mesh if exists
@@ -1431,60 +1430,54 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool rende
 		glBindTexture(GL_TEXTURE_2D, tile->maskTexture);
 		glDrawArrays(GL_TRIANGLES, 0, tile->terrainVertexCount);
 		glBindVertexArray(0);
-
-		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D_ARRAY, 0); // unbind terrain array
-
-		glActiveTexture(GL_TEXTURE1);
-		glBindTexture(GL_TEXTURE_2D, 0); // unbind mask texture
 	}
 
 	// render walkable surfaces
-	// if (renderNavMesh)
-	// {
-	// 	shader.setInt("renderMode", 5);
+	if (renderNavMesh)
+	{
+		shader.setInt("renderMode", 5);
 
-	// 	for (TileTerrain *tile : tilesVisible)
-	// 	{
-	// 		if (!tile)
-	// 			continue;
+		for (TileTerrain *tile : tilesVisible)
+		{
+			if (!tile)
+				continue;
 
-	// 		if (tile->navVAO == 0 || tile->navVBO == 0)
-	// 			continue;
+			if (tile->navVAO == 0 || tile->navVBO == 0)
+				continue;
 
-	// 		glBindVertexArray(tile->navVAO);
+			glBindVertexArray(tile->navVAO);
 
-	// 		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-	// 		glDrawArrays(GL_TRIANGLES, 0, tile->navmeshVertexCount);
+			glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+			glDrawArrays(GL_TRIANGLES, 0, tile->navmeshVertexCount);
 
-	// 		glBindVertexArray(0);
-	// 	}
-	// }
+			glBindVertexArray(0);
+		}
+	}
 
 	// render physics
-	// if (renderPhysics)
-	// {
-	// 	for (TileTerrain *tile : tilesVisible)
-	// 	{
-	// 		if (!tile)
-	// 			continue;
+	if (renderPhysics)
+	{
+		for (TileTerrain *tile : tilesVisible)
+		{
+			if (!tile)
+				continue;
 
-	// 		if (tile->phyVAO == 0 || tile->phyVBO == 0)
-	// 			continue;
+			if (tile->phyVAO == 0 || tile->phyVBO == 0)
+				continue;
 
-	// 		glBindVertexArray(tile->phyVAO);
+			glBindVertexArray(tile->phyVAO);
 
-	// 		shader.setInt("renderMode", 4);
-	// 		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-	// 		glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
+			shader.setInt("renderMode", 4);
+			glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+			glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
 
-	// 		shader.setInt("renderMode", 2);
-	// 		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-	// 		glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
+			shader.setInt("renderMode", 2);
+			glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+			glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
 
-	// 		glBindVertexArray(0);
-	// 	}
-	// }
+			glBindVertexArray(0);
+		}
+	}
 
 	// render water and 3D models
 	for (TileTerrain *tile : tilesVisible)

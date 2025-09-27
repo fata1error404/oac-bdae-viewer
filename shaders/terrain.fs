@@ -1,16 +1,14 @@
 #version 330 core
 
 in vec3 PosWorldSpace;
-in vec3 barycentric;
-in vec2 TexCoord1;         // Detail UVs
-in vec2 TexCoord2;         // Mask UVs
-in float texIdx1;
-in float texIdx2;
-in float texIdx3;
-in vec4 BlendWeights;      // Optional baked blend weights
 in vec3 Normal;
-
-out vec4 FragColor;
+in vec2 TexCoord1;
+in vec2 TexCoord2;
+in float TexIdx1;
+in float TexIdx2;
+in float TexIdx3;
+in vec4 TexBlendWeights;
+in vec3 Barycentric;
 
 uniform vec3 cameraPos;
 uniform sampler2DArray baseTextureArray;
@@ -24,23 +22,22 @@ uniform float ambientStrength;
 uniform float diffuseStrength;
 uniform float specularStrength;
 
+out vec4 FragColor;
+
 void main()
 {
     if (renderMode == 1)
     {
-        vec4 color1 = vec4(0.0, 0.0, 0.0, 0.0);
-        vec4 color2 = vec4(0.0, 0.0, 0.0, 0.0);
-        vec4 color3 = vec4(0.0, 0.0, 0.0, 0.0);
-
-        color1 = texture(baseTextureArray, vec3(TexCoord1, texIdx1));
-        color2 = texture(baseTextureArray, vec3(TexCoord1, texIdx2));
-        color3 = texture(baseTextureArray, vec3(TexCoord1, texIdx3));
-
+        vec4 color1 = texture(baseTextureArray, vec3(TexCoord1, TexIdx1));
+        vec4 color2 = texture(baseTextureArray, vec3(TexCoord1, TexIdx2));
+        vec4 color3 = texture(baseTextureArray, vec3(TexCoord1, TexIdx3));
         vec4 mask = texture(maskTexture, TexCoord2);
+
+        // [TODO] by far without blend weights it matches source code formula
         vec3 baseColor =
-            color1.rgb * BlendWeights.b * (1.0 - mask.r - mask.g) +
-            color2.rgb * BlendWeights.r * mask.r +
-            color3.rgb * BlendWeights.g * mask.g;
+            color1.rgb * TexBlendWeights.b * (1.0 - mask.r - mask.g) +
+            color2.rgb * TexBlendWeights.r * mask.r +
+            color3.rgb * TexBlendWeights.g * mask.g;
 
         if (lighting)
         {
@@ -48,10 +45,11 @@ void main()
             vec3 L = normalize(lightPos - PosWorldSpace);
             float diff = max(dot(N, L), 0.0);
 
-            vec3 ambient = 0.5 * lightColor;
-            vec3 diffuse = 0.4 * lightColor * diff;
+            vec3 ambient = 0.2 * lightColor;
+            vec3 diffuse = 0.5 * lightColor * diff;
 
-            baseColor = (ambient + diffuse) * baseColor;
+            float shadow = 1.0 - texture(maskTexture, TexCoord2).b;
+            baseColor = (ambient + diffuse) * shadow * baseColor ;
         }
 
         FragColor = vec4(baseColor, 1.0);
@@ -60,7 +58,7 @@ void main()
         FragColor = vec4(0.4f, 0.2f, 0.1f, 1.0f);
     else if (renderMode == 3)
     {
-        float minB = min(min(barycentric.x, barycentric.y), barycentric.z);
+        float minB = min(min(Barycentric.x, Barycentric.y), Barycentric.z);
         float w = fwidth(minB) * 0.2;
         float edgeFactor = smoothstep(w * 0.5, w, minB);
 
