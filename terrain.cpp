@@ -113,11 +113,11 @@ void Terrain::load(const char *fpath, Sound &sound)
 	// build vertex data in world space coordinates
 	getTerrainVertices();
 
+	getNavigationVertices(navMesh);
+
 	getPhysicsVertices();
 
 	getWaterVertices();
-
-	getNavigationVertices(navMesh);
 
 	// load skybox
 	std::string terrainFileName = std::filesystem::path(fpath).filename().string();
@@ -165,13 +165,13 @@ void Terrain::load(const char *fpath, Sound &sound)
 		camera.Pitch = -15.0f;
 		camera.Yaw = -125.0f;
 	}
-	else if (terrainName == "relic's_key")
+	else if (terrainName == "1_relic's_key")
 	{
 		camera.Position = glm::vec3(-200, 100, 210);
 		camera.Pitch = -25.0f;
 		camera.Yaw = -40.0f;
 	}
-	else if (terrainName == "knahswahs_prison")
+	else if (terrainName == "2_knahswahs_prison")
 	{
 		camera.Position = glm::vec3(-475, 140, -2050);
 		camera.Pitch = -30.0f;
@@ -212,48 +212,33 @@ void Terrain::uploadToGPU(TileTerrain *tile)
 	{
 		glGenVertexArrays(1, &tile->trnVAO);
 		glGenBuffers(1, &tile->trnVBO);
-
 		glBindVertexArray(tile->trnVAO);
 		glBindBuffer(GL_ARRAY_BUFFER, tile->trnVBO);
-		GLsizeiptr bufSize = (GLsizeiptr)(tile->terrainVertices.size() * sizeof(float));
-		glBufferData(GL_ARRAY_BUFFER, bufSize, tile->terrainVertices.data(), GL_STATIC_DRAW);
-
+		glBufferData(GL_ARRAY_BUFFER, tile->terrainVertices.size() * sizeof(float), tile->terrainVertices.data(), GL_STATIC_DRAW);
 		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 18 * sizeof(float), (void *)0);
 		glEnableVertexAttribArray(0);
-
 		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 18 * sizeof(float), (void *)(3 * sizeof(float)));
 		glEnableVertexAttribArray(1);
-
 		glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 18 * sizeof(float), (void *)(6 * sizeof(float)));
 		glEnableVertexAttribArray(2);
-
 		glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, 18 * sizeof(float), (void *)(8 * sizeof(float)));
 		glEnableVertexAttribArray(3);
-
 		glVertexAttribPointer(4, 4, GL_FLOAT, GL_FALSE, 18 * sizeof(float), (void *)(11 * sizeof(float)));
 		glEnableVertexAttribArray(4);
-
 		glVertexAttribPointer(5, 3, GL_FLOAT, GL_FALSE, 18 * sizeof(float), (void *)(15 * sizeof(float)));
 		glEnableVertexAttribArray(5);
-
 		glBindVertexArray(0);
 	}
 
-	if (!tile->water.vertices.empty())
+	if (!tile->navigationVertices.empty())
 	{
-		glGenVertexArrays(1, &tile->water.VAO);
-		glGenBuffers(1, &tile->water.VBO);
-
-		glBindVertexArray(tile->water.VAO);
-		glBindBuffer(GL_ARRAY_BUFFER, tile->water.VBO);
-		glBufferData(GL_ARRAY_BUFFER, tile->water.vertices.size() * sizeof(float), tile->water.vertices.empty() ? nullptr : tile->water.vertices.data(), GL_STATIC_DRAW);
+		glGenVertexArrays(1, &tile->navVAO);
+		glGenBuffers(1, &tile->navVBO);
+		glBindVertexArray(tile->navVAO);
+		glBindBuffer(GL_ARRAY_BUFFER, tile->navVBO);
+		glBufferData(GL_ARRAY_BUFFER, tile->navigationVertices.size() * sizeof(float), tile->navigationVertices.data(), GL_STATIC_DRAW);
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
 		glEnableVertexAttribArray(0);
-		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)0);
-		glEnableVertexAttribArray(1);
-		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(3 * sizeof(float)));
-		glEnableVertexAttribArray(2);
-		glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(6 * sizeof(float)));
-
 		glBindVertexArray(0);
 	}
 
@@ -266,19 +251,53 @@ void Terrain::uploadToGPU(TileTerrain *tile)
 		glBufferData(GL_ARRAY_BUFFER, tile->physicsVertices.size() * sizeof(float), tile->physicsVertices.data(), GL_STATIC_DRAW);
 		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
 		glEnableVertexAttribArray(0);
+		glBindVertexArray(0);
 	}
 
-	if (!tile->navigationVertices.empty())
+	if (!tile->water.vertices.empty())
 	{
-		glGenVertexArrays(1, &tile->navVAO);
-		glGenBuffers(1, &tile->navVBO);
-		glBindVertexArray(tile->navVAO);
-		glBindBuffer(GL_ARRAY_BUFFER, tile->navVBO);
-		GLsizeiptr bufSize = (GLsizeiptr)(tile->navigationVertices.size() * sizeof(float));
-		glBufferData(GL_ARRAY_BUFFER, bufSize, tile->navigationVertices.data(), GL_STATIC_DRAW);
-		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
+		glGenVertexArrays(1, &tile->water.VAO);
+		glGenBuffers(1, &tile->water.VBO);
+		glBindVertexArray(tile->water.VAO);
+		glBindBuffer(GL_ARRAY_BUFFER, tile->water.VBO);
+		glBufferData(GL_ARRAY_BUFFER, tile->water.vertices.size() * sizeof(float), tile->water.vertices.data(), GL_STATIC_DRAW);
 		glEnableVertexAttribArray(0);
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)0);
+		glEnableVertexAttribArray(1);
+		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(3 * sizeof(float)));
+		glEnableVertexAttribArray(2);
+		glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(6 * sizeof(float)));
 		glBindVertexArray(0);
+	}
+
+	for (auto &m : tile->models)
+	{
+		std::shared_ptr<Model> model = m.first;
+
+		if (model && model->modelLoaded)
+		{
+			model->EBOs.resize(model->totalSubmeshCount);
+			glGenVertexArrays(1, &model->VAO);
+			glGenBuffers(1, &model->VBO);
+			glGenBuffers(model->totalSubmeshCount, model->EBOs.data());
+			glBindVertexArray(model->VAO);
+			glBindBuffer(GL_ARRAY_BUFFER, model->VBO);
+			glBufferData(GL_ARRAY_BUFFER, model->vertices.size() * sizeof(float), model->vertices.data(), GL_STATIC_DRAW);
+			glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)0);
+			glEnableVertexAttribArray(0);
+			glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(3 * sizeof(float)));
+			glEnableVertexAttribArray(1);
+			glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(6 * sizeof(float)));
+			glEnableVertexAttribArray(2);
+
+			for (int i = 0; i < model->totalSubmeshCount; i++)
+			{
+				glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, model->EBOs[i]);
+				glBufferData(GL_ELEMENT_ARRAY_BUFFER, model->indices[i].size() * sizeof(unsigned short), model->indices[i].data(), GL_STATIC_DRAW);
+			}
+
+			glBindVertexArray(0);
+		}
 	}
 }
 
@@ -292,6 +311,7 @@ void Terrain::releaseFromGPU(TileTerrain *tile)
 		glDeleteVertexArrays(1, &tile->trnVAO);
 		tile->trnVAO = 0;
 	}
+
 	if (tile->trnVBO)
 	{
 		glDeleteBuffers(1, &tile->trnVBO);
@@ -303,6 +323,7 @@ void Terrain::releaseFromGPU(TileTerrain *tile)
 		glDeleteVertexArrays(1, &tile->navVAO);
 		tile->navVAO = 0;
 	}
+
 	if (tile->navVBO)
 	{
 		glDeleteBuffers(1, &tile->navVBO);
@@ -314,6 +335,7 @@ void Terrain::releaseFromGPU(TileTerrain *tile)
 		glDeleteVertexArrays(1, &tile->phyVAO);
 		tile->phyVAO = 0;
 	}
+
 	if (tile->phyVBO)
 	{
 		glDeleteBuffers(1, &tile->phyVBO);
@@ -325,25 +347,72 @@ void Terrain::releaseFromGPU(TileTerrain *tile)
 		glDeleteVertexArrays(1, &tile->water.VAO);
 		tile->water.VAO = 0;
 	}
+
 	if (tile->water.VBO)
 	{
 		glDeleteBuffers(1, &tile->water.VBO);
 		tile->water.VBO = 0;
 	}
 
-	// for (auto &m : tile->models)
-	// {
-	// 	if (m)
-	// 	{
-	// 		// Provide a safe model-level unload method if your Model class supports it,
-	// 		// e.g. m->releaseGPU(); Otherwise skip this.
-	// 		// m->releaseGPU();
-	// 	}
-	// }
+	for (auto &m : tile->models)
+	{
+		std::shared_ptr<Model> model = m.first;
+
+		if (model && model->modelLoaded)
+		{
+			if (!model->EBOs.empty())
+			{
+				glDeleteBuffers(model->EBOs.size(), model->EBOs.data());
+				model->EBOs.clear();
+			}
+
+			if (model->VBO)
+			{
+				glDeleteBuffers(1, &model->VBO);
+				model->VBO = 0;
+			}
+
+			if (model->VAO)
+			{
+				glDeleteVertexArrays(1, &model->VAO);
+				model->VAO = 0;
+			}
+		}
+	}
 }
 
 void Terrain::getTerrainVertices()
 {
+	// pre-load all unique .trn textures
+	unsigned int textureCount = uniqueTextureNames.size();
+	std::vector<unsigned char *> trnTextures(textureCount, NULL);
+	int width, height, nrChannels;
+
+	for (int i = 0; i < textureCount; i++)
+	{
+		std::string textureName = uniqueTextureNames[i];
+		std::replace(textureName.begin(), textureName.end(), '\\', '/');
+
+		const std::string needle = "texture/";
+		const std::string insertStr = "unsorted/";
+
+		if (auto pos = textureName.find(needle); pos != std::string::npos)
+		{
+			size_t ins = pos + needle.size();
+			if (textureName.compare(ins, insertStr.size(), insertStr) != 0)
+				textureName.insert(ins, insertStr);
+		}
+
+		textureName = "data/" + textureName;
+
+		unsigned char *data = stbi_load(textureName.c_str(), &width, &height, &nrChannels, 4);
+
+		if (!data)
+			std::cout << "Failed to load texture: " << textureName << "\n";
+		else
+			trnTextures[i] = data;
+	}
+
 	static const int FLOATS_PER_TERR_VERTEX = 18;
 
 	// 3. build the terrain mesh vertex data in world space coordinates (structured as triangles, which is optimal for rendering terrain surface; 1D vector with the following format: x1, y1, z1, x2, y2, z2, .. )
@@ -364,43 +433,53 @@ void Terrain::getTerrainVertices()
 			t->terrainVertices.clear();
 			t->terrainVertices.reserve(approxVerts * 6);
 
-			for (int col = 0; col < UnitsInTileCol; ++col)
+			for (int col = 0; col < 64; col++)
 			{
-				for (int row = 0; row < UnitsInTileRow; ++row)
+				for (int row = 0; row < 64; row++)
 				{
-					float x0 = t->startX + (float)col;
-					float x1 = t->startX + (float)(col + 1);
-					float z0 = t->startZ + (float)row;
-					float z1 = t->startZ + (float)(row + 1);
+					float x0 = t->startX + float(col);
+					float x1 = t->startX + float(col + 1);
+					float z0 = t->startZ + float(row);
+					float z1 = t->startZ + float(row + 1);
 
 					float y00 = t->Y[row][col];
 					float y10 = t->Y[row][col + 1];
 					float y01 = t->Y[row + 1][col];
 					float y11 = t->Y[row + 1][col + 1];
 
-					// <-- minimal change here -->
-					// texture coordinates: match original TRN behavior:
-					// TCoords.X = vx * 0.125f; TCoords.Y = vy * 0.125f
-					float u0 = (float)col * 0.125f;
-					float u1 = (float)(col + 1) * 0.125f;
-					float v0 = (float)row * 0.125f;
-					float v1 = (float)(row + 1) * 0.125f;
-					// <-- end change -->
+					// chunk coordinates
+					int chunkX = col / 8;
+					int chunkZ = row / 8;
 
-					int chunkCol = col / 8;
-					int chunkRow = row / 8;
-					ChunkInfo &chunk = t->chunks[chunkRow * 8 + chunkCol];
+					// local coords within chunk
+					int localCol = col % 8;
+					int localRow = row % 8;
+
+					// UVs: 0->1 across chunk
+					float u0 = float(col) / float(UnitsInTileCol);
+					float u1 = float(col + 1) / float(UnitsInTileCol);
+					float v0 = float(row) / float(UnitsInTileRow);
+					float v1 = float(row + 1) / float(UnitsInTileRow);
+
+					ChunkInfo &chunk = t->chunks[chunkZ * 8 + chunkX];
 					int tex1 = chunk.texNameIndex1;
 					int tex2 = chunk.texNameIndex2;
 					int tex3 = chunk.texNameIndex3;
 
+					// Debug print
+					// std::cout << "Tile[" << i << "][" << j << "] "
+					// 		  << "Unit[" << col << "," << row << "] "
+					// 		  << "Chunk[" << chunkX << "," << chunkZ << "] "
+					// 		  << "UVs: (" << u0 << "," << v0 << ") - (" << u1 << "," << v1 << ") "
+					// 		  << "Tex: " << tex1 << "," << tex2 << "," << tex3 << std::endl;
+
 					auto unpack_blend = [](glm::u8vec4 rgba) -> std::array<float, 4>
 					{
 						return {
-							rgba.r / 255.0f,
-							rgba.g / 255.0f,
-							rgba.b / 255.0f,
-							rgba.a / 255.0f};
+							static_cast<float>(rgba.r) / 255.0f,
+							static_cast<float>(rgba.g) / 255.0f,
+							static_cast<float>(rgba.b) / 255.0f,
+							static_cast<float>(rgba.a) / 255.0f};
 					};
 
 					auto blend00 = unpack_blend(t->colors[row][col]);
@@ -447,80 +526,29 @@ void Terrain::getTerrainVertices()
 				}
 			}
 
-			/*
 			// load texture(s)
-			int textureCount = (int)t->textureNames.size();
-			std::vector<unsigned char *> pixelData(textureCount);
-			int w, h, c, nrChannels = 0;
-
-			for (int i = 0; i < textureCount; ++i)
-			{
-				// normalize slashes
-				std::replace(t->textureNames[i].begin(), t->textureNames[i].end(), '\\', '/');
-
-				const std::string needle = "texture/";
-				const std::string insertStr = "unsorted/";
-
-				size_t pos = t->textureNames[i].find(needle);
-
-				if (pos != std::string::npos)
-				{
-					size_t ins = pos + needle.size();
-					// only insert if "unsorted/" is not already there
-					if (t->textureNames[i].compare(ins, insertStr.size(), insertStr) != 0)
-					{
-						t->textureNames[i].insert(ins, insertStr);
-					}
-				}
-
-				t->textureNames[i] = "data/" + t->textureNames[i];
-
-				pixelData[i] = stbi_load(t->textureNames[i].c_str(), &w, &h, &c, 4);
-				if (!pixelData[i])
-				{
-					std::cout << "Failed to load texture: " << t->textureNames[i] << "\n";
-					continue;
-				}
-			}
-
 			glGenTextures(1, &t->textureMap);
 			glBindTexture(GL_TEXTURE_2D_ARRAY, t->textureMap);
+			std::cout << "texture width = " << 256 << " height = " << 256 << std::endl;
+			glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, GL_RGBA8, 256, 256, t->textureIndices.size());
 
-			// Allocate storage: 1 mip level, RGBA8, width x height, depth = textureCount
-			glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, GL_RGBA8, w, h, textureCount);
-
-			// 3) Upload each image into its layer
-			for (int i = 0; i < textureCount; ++i)
+			for (int i = 0; i < t->textureIndices.size(); i++)
 			{
-				if (pixelData[i])
-				{
-					glTexSubImage3D(
-						GL_TEXTURE_2D_ARRAY,
-						0,		 // mip level
-						0, 0, i, // x, y, layer
-						w,
-						h,
-						1, // depth = 1 slice
-						GL_RGBA,
-						GL_UNSIGNED_BYTE,
-						pixelData[i]);
-				}
+				int globalTextureIndex = t->textureIndices[i];
+
+				if (globalTextureIndex < trnTextures.size() && trnTextures[globalTextureIndex])
+					glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, i, 256, 256, 1, GL_RGBA, GL_UNSIGNED_BYTE, trnTextures[globalTextureIndex]);
+
+				else
+					std::cout << "Missing texture for global index " << globalTextureIndex << std::endl;
 			}
 
-			// 4) Set filtering/wrap params once on the array
 			glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 			glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 			glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_REPEAT);
 			glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_REPEAT);
-
-			// generate mipmaps (optional if you allocated >1 level)
 			glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
-
-			// free CPU image data
-			for (auto ptr : pixelData)
-				if (ptr)
-					stbi_image_free(ptr);
-			*/
+			glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
 
 			// compute vertex count (every vertex = 18 floats)
 			if (t->terrainVertices.empty())
@@ -529,6 +557,11 @@ void Terrain::getTerrainVertices()
 				t->terrainVertexCount = (int)(t->terrainVertices.size() / FLOATS_PER_TERR_VERTEX);
 		}
 	}
+
+	// free CPU image data
+	for (auto ptr : trnTextures)
+		if (ptr)
+			stbi_image_free(ptr);
 }
 
 void Terrain::getWaterVertices()
@@ -1081,6 +1114,7 @@ void Terrain::reset()
 
 	bdaeModelCache.clear();
 	physicsModelCache.clear();
+	uniqueTextureNames.clear();
 }
 
 // Replace the whole function in your file with this version.
@@ -1289,8 +1323,8 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool rende
 			continue;
 
 		glBindVertexArray(tile->trnVAO);
-		// glActiveTexture(GL_TEXTURE0);
-		// glBindTexture(GL_TEXTURE_2D_ARRAY, tile->textureMap);
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D_ARRAY, tile->textureMap);
 		glDrawArrays(GL_TRIANGLES, 0, tile->terrainVertexCount);
 		glBindVertexArray(0);
 	}
@@ -1299,7 +1333,7 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool rende
 	if (renderNavMesh)
 	{
 		shader.setInt("renderMode", 5);
-		shader.setInt("terrainBlendMode", 2);
+		shader.setInt("terrainBlendMode", 0); // [unused]
 
 		for (TileTerrain *tile : tilesVisible)
 		{

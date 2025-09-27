@@ -75,9 +75,9 @@ class TileTerrain
 	std::vector<float> terrainVertices, navigationVertices, physicsVertices; // vertex data
 	std::vector<Physics *> physicsGeometry;									 // .phy models
 	std::vector<std::pair<std::shared_ptr<Model>, glm::mat4>> models;		 // .bdae models
-	std::vector<std::string> textureNames;
-	unsigned int textureMap;
-	Water water; // water surface
+	std::vector<int> textureIndices;										 // ..
+	unsigned int textureMap;												 // ..
+	Water water;															 // water surface
 
 	float startX, startZ;							 // position on the grid in world space coordinates
 	float Y[UnitsInTileRow + 1][UnitsInTileCol + 1]; // height map (unscaled)
@@ -111,10 +111,10 @@ class TileTerrain
 		glDeleteBuffers(1, &navVBO);
 		glDeleteBuffers(1, &phyVBO);
 
-		if (!textureNames.empty())
+		if (!textureIndices.empty())
 		{
 			glDeleteTextures(1, &textureMap);
-			textureNames.clear();
+			textureIndices.clear();
 		}
 
 		trnVAO = trnVBO = navVAO = navVBO = phyVAO = phyVBO = 0;

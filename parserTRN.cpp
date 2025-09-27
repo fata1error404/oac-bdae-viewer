@@ -63,15 +63,19 @@ TileTerrain *TileTerrain::load(IReadResFile *trnFile, int &gridX, int &gridZ, Te
 
 		prevPosition += sizeOfName[i];
 
-		// register texture: check if texture name already exists in the list of unique names (if it doesn't, add it and assign a new index; if it does, reuse the existing index)
-		std::vector<std::string>::iterator foundPos = std::find(tileTerrain->textureNames.begin(), tileTerrain->textureNames.end(), textureName);
-		if (foundPos == tileTerrain->textureNames.end())
+		// register texture per-terrain – globally: check if texture name already exists in the list of unique names (if it doesn't, add it and assign a new index; if it does, reuse the existing index); used to pre-load all terrain textures
+		std::vector<std::string>::iterator namePos = std::find(terrain.uniqueTextureNames.begin(), terrain.uniqueTextureNames.end(), textureName);
+
+		if (namePos == terrain.uniqueTextureNames.end())
 		{
-			tileTerrain->textureNames.push_back(textureName);
-			newTexNameIndex[i] = (int)tileTerrain->textureNames.size() - 1;
+			terrain.uniqueTextureNames.push_back(textureName);
+			newTexNameIndex[i] = (int)terrain.uniqueTextureNames.size() - 1;
 		}
 		else
-			newTexNameIndex[i] = (int)std::distance(tileTerrain->textureNames.begin(), foundPos);
+			newTexNameIndex[i] = (int)std::distance(terrain.uniqueTextureNames.begin(), namePos);
+
+		// register texture per-tile – locally; used to select textures from global list when creating tile's texture map
+		tileTerrain->textureIndices.push_back(newTexNameIndex[i]);
 	}
 
 	// 4. parse chunk data section, retrieve: textures and other metadata about each chunk
@@ -124,51 +128,49 @@ TileTerrain *TileTerrain::load(IReadResFile *trnFile, int &gridX, int &gridZ, Te
 	tileTerrain->BBox.MinEdge.Y = minHeight * 0.01f;
 	tileTerrain->BBox.MaxEdge.Y = maxHeight * 0.01f;
 
-	/*
-		// 6. parse vertex colors (colors are stored as 16-bit packed RGB-565)
-		// ____________________
+	// 6. parse vertex colors (colors are stored as 16-bit packed RGB-565)
+	// ____________________
 
-		uint16_t *color = (uint16_t *)(buffer + sizeof(TRNFileHeader) + ChunksInTile * sizeof(ChunkInfo) + ((UnitsInTileRow + 1) * (UnitsInTileCol + 1)) * sizeof(short));
+	uint16_t *color = (uint16_t *)(buffer + sizeof(TRNFileHeader) + ChunksInTile * sizeof(ChunkInfo) + ((UnitsInTileRow + 1) * (UnitsInTileCol + 1)) * sizeof(short));
 
-		for (int v = 0, vy = 0; vy <= UnitsInTileRow; vy++)
+	for (int v = 0, vy = 0; vy <= UnitsInTileRow; vy++)
+	{
+		for (int vx = 0; vx <= UnitsInTileCol; vx++, v++)
 		{
-			for (int vx = 0; vx <= UnitsInTileCol; vx++, v++)
-			{
-				uint16_t c = color[v];
-				// unpack 16-bit RGB-565 color into 8-bit RGBA components (bitwise arithmetic)
-				uint8_t r = (uint8_t)(((c & 0xF800) >> 8) | ((c & 0xF800) >> 13));
-				uint8_t g = (uint8_t)(((c & 0x07E0) >> 3) | ((c & 0x07E0) >> 9));
-				uint8_t b = (uint8_t)(((c & 0x001F) << 3) | ((c & 0x001F) >> 2));
+			uint16_t c = color[v];
+			// unpack 16-bit RGB-565 color into 8-bit RGBA components (bitwise arithmetic)
+			uint8_t r = (uint8_t)(((c & 0xF800) >> 8) | ((c & 0xF800) >> 13));
+			uint8_t g = (uint8_t)(((c & 0x07E0) >> 3) | ((c & 0x07E0) >> 9));
+			uint8_t b = (uint8_t)(((c & 0x001F) << 3) | ((c & 0x001F) >> 2));
 
-				tileTerrain->colors[vy][vx] = glm::u8vec4(r, g, b, 0xFF);
-			}
+			tileTerrain->colors[vy][vx] = glm::u8vec4(r, g, b, 0xFF);
 		}
+	}
 
-		// 7. parse vertex normal vectors (normals are stores as signed bytes)
-		// ____________________
+	// 7. parse vertex normal vectors (normals are stores as signed bytes)
+	// ____________________
 
-		int8_t *normal = (int8_t *)(buffer + sizeof(TRNFileHeader) + ChunksInTile * sizeof(ChunkInfo) + ((UnitsInTileRow + 1) * (UnitsInTileCol + 1)) * 4);
+	int8_t *normal = (int8_t *)(buffer + sizeof(TRNFileHeader) + ChunksInTile * sizeof(ChunkInfo) + ((UnitsInTileRow + 1) * (UnitsInTileCol + 1)) * 4);
 
-		for (int v = 0, vy = 0; vy <= UnitsInTileRow; vy++)
+	for (int v = 0, vy = 0; vy <= UnitsInTileRow; vy++)
+	{
+		for (int vx = 0; vx <= UnitsInTileCol; vx++, v++)
 		{
-			for (int vx = 0; vx <= UnitsInTileCol; vx++, v++)
-			{
-				glm::vec3 n;
-				int8_t nx = normal[v * 3];
-				int8_t ny = normal[v * 3 + 1];
-				int8_t nz = normal[v * 3 + 2];
+			glm::vec3 n;
+			int8_t nx = normal[v * 3];
+			int8_t ny = normal[v * 3 + 1];
+			int8_t nz = normal[v * 3 + 2];
 
-				// convert from [-128, 127] range to [-1, 1]
-				n.x = nx * 0.007874f;
-				n.y = ny * 0.007874f;
-				n.z = nz * 0.007874f;
+			// convert from [-128, 127] range to [-1, 1]
+			n.x = nx * 0.007874f;
+			n.y = ny * 0.007874f;
+			n.z = nz * 0.007874f;
 
-				n = glm::normalize(n); // ensure the vector is unit length
+			n = glm::normalize(n); // ensure the vector is unit length
 
-				tileTerrain->normals[vy][vx] = n;
-			}
+			tileTerrain->normals[vy][vx] = n;
 		}
-	*/
+	}
 
 	if (buffer != loadBuffer)
 		delete[] buffer;

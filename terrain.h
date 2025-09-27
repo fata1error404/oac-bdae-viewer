@@ -45,6 +45,8 @@ class Terrain
 	int tilesX, tilesZ;							   // terrain size in tiles
 	bool terrainLoaded;
 
+	std::vector<std::string> uniqueTextureNames; // global unique texture names
+
 	Terrain(Camera &cam, Light &light)
 		: shader("shaders/terrain.vs", "shaders/terrain.fs"),
 		  sky("shaders/skybox.vs", "shaders/skybox.fs"),

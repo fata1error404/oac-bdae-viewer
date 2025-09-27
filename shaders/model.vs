@@ -1,7 +1,7 @@
 // .vs = vertex shader; executed on each vertex
 #version 330 core
 
-// input from GPU vertex buffer (per-vertex attributes)
+// input from GPU vertex buffer (per-vertex attributes defined with glVertexAttribPointer)
 layout (location = 0) in vec3 aPos;
 layout (location = 1) in vec3 aNormal;
 layout (location = 2) in vec2 aTexCoord;

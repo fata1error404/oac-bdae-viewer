@@ -24,68 +24,57 @@ uniform int terrainBlendMode; // 0 = average, 1 = weighted, 2 = dominant
 
 void main()
 {
+    // if (renderMode == 1)
+    // {
+    //     vec3 texCol = vec3(0.0);
+    //     float count = 0.0;
+    //     vec3 weights = max(vec3(0.0), BlendWeights.rgb);
+
+    //     if (texIdx.x >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.x)).rgb; count += 1.0; }
+    //     if (texIdx.y >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.y)).rgb; count += 1.0; }
+    //     if (texIdx.z >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.z)).rgb; count += 1.0; }
+    //     if (count > 0.0) texCol /= count; else texCol = vec3(0.2);
+
+    //     vec3 tinted = texCol * clamp(BlendWeights.rgb, 0.0, 1.0);
+
+    //     vec3 litCol = tinted;
+    //     if (lighting)
+    //     {
+    //         vec3 N = Normal;
+    //         vec3 L = normalize(lightPos - PosWorldSpace);
+    //         float diff = max(dot(N, L), 0.0);
+
+    //         vec3 ambient = 0.5  * lightColor;
+    //         vec3 diffuse = 0.4  * lightColor * diff;
+
+    //         litCol = (ambient + diffuse) * litCol;
+    //     }
+
+    //     FragColor = vec4(litCol * 0.85, 1.0);
+    // }
     if (renderMode == 1)
     {
+        // vec3 texCol = vec3(0.2); // fallback color
+
+        vec3 weights = clamp(BlendWeights.rgb, 0.0, 1.0);
         vec3 texCol = vec3(0.0);
-        float count = 0.0;
-        vec3 weights = max(vec3(0.0), BlendWeights.rgb);
+        if (texIdx.x >= 0) texCol += texture(terrainArray, vec3(TexCoord, texIdx.x)).rgb * weights.x;
+        if (texIdx.y >= 0) texCol += texture(terrainArray, vec3(TexCoord, texIdx.y)).rgb * weights.y;
+        if (texIdx.z >= 0) texCol += texture(terrainArray, vec3(TexCoord, texIdx.z)).rgb * weights.z;
 
-        if (terrainBlendMode == 2)
-        {
-            int bestIdx = -1;
-            float bestW = -1.0;
-            if (texIdx.x >= 0 && weights.x > bestW) { bestW = weights.x; bestIdx = texIdx.x; }
-            if (texIdx.y >= 0 && weights.y > bestW) { bestW = weights.y; bestIdx = texIdx.y; }
-            if (texIdx.z >= 0 && weights.z > bestW) { bestW = weights.z; bestIdx = texIdx.z; }
 
-            if (bestIdx >= 0)
-            {
-                texCol = texture(terrainArray, vec3(TexCoord, bestIdx)).rgb;
-            }
-            else
-            {
-                if (texIdx.x >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.x)).rgb; count += 1.0; }
-                if (texIdx.y >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.y)).rgb; count += 1.0; }
-                if (texIdx.z >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.z)).rgb; count += 1.0; }
-                if (count > 0.0) texCol /= count; else texCol = vec3(0.2);
-            }
-        }
-        else if (terrainBlendMode == 1)
-        {
-            float wsum = 0.0;
-            if (texIdx.x >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.x)).rgb * weights.x; wsum += weights.x; }
-            if (texIdx.y >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.y)).rgb * weights.y; wsum += weights.y; }
-            if (texIdx.z >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.z)).rgb * weights.z; wsum += weights.z; }
-            if (wsum > 1e-6) texCol /= wsum;
-            else
-            {
-                if (texIdx.x >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.x)).rgb; count += 1.0; }
-                if (texIdx.y >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.y)).rgb; count += 1.0; }
-                if (texIdx.z >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.z)).rgb; count += 1.0; }
-                if (count > 0.0) texCol /= count; else texCol = vec3(0.2);
-            }
-        }
-        else // best so far
-        {
-            if (texIdx.x >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.x)).rgb; count += 1.0; }
-            if (texIdx.y >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.y)).rgb; count += 1.0; }
-            if (texIdx.z >= 0) { texCol += texture(terrainArray, vec3(TexCoord, texIdx.z)).rgb; count += 1.0; }
-            if (count > 0.0) texCol /= count; else texCol = vec3(0.2);
-        }
+        vec3 litCol = texCol;
 
-        vec3 tinted = texCol * clamp(BlendWeights.rgb, 0.0, 1.0);
-
-        vec3 litCol = tinted;
         if (lighting)
         {
-            vec3 N = Normal;
+            vec3 N = normalize(Normal);
             vec3 L = normalize(lightPos - PosWorldSpace);
             float diff = max(dot(N, L), 0.0);
 
-            vec3 ambient = 0.5  * lightColor;
-            vec3 diffuse = 0.4  * lightColor * diff;
+            vec3 ambient = 0.5 * lightColor;
+            vec3 diffuse = 0.4 * lightColor * diff;
 
-            litCol = (ambient + diffuse) * litCol;
+            litCol *= (ambient + diffuse);
         }
 
         FragColor = vec4(litCol * 0.85, 1.0);

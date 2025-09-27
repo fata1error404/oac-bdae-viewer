@@ -683,27 +683,30 @@ void Model::load(const char *fpath, Sound &sound, bool isTerrainViewer)
 	delete bdaeArchive;
 
 	// 6. setup buffers
-	EBOs.resize(totalSubmeshCount);
-	glGenVertexArrays(1, &VAO);					  // generate a Vertex Attribute Object to store vertex attribute configurations
-	glGenBuffers(1, &VBO);						  // generate a Vertex Buffer Object to store vertex data
-	glGenBuffers(totalSubmeshCount, EBOs.data()); // generate an Element Buffer Object for each submesh to store index data
-
-	glBindVertexArray(VAO); // bind the VAO first so that subsequent VBO bindings and vertex attribute configurations are stored in it correctly
-
-	glBindBuffer(GL_ARRAY_BUFFER, VBO);																 // bind the VBO
-	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_STATIC_DRAW); // copy vertex data into the GPU buffer's memory
-
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)0); // define the layout of the vertex data (vertex attribute configuration): index 0, 3 components per vertex, type float, not normalized, with a stride of 8 * sizeof(float) (next vertex starts after 8 floats), and an offset of 0 in the buffer
-	glEnableVertexAttribArray(0);
-	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(3 * sizeof(float)));
-	glEnableVertexAttribArray(1);
-	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(6 * sizeof(float)));
-	glEnableVertexAttribArray(2);
-
-	for (int i = 0; i < totalSubmeshCount; i++)
+	if (!isTerrainViewer)
 	{
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBOs[i]);
-		glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices[i].size() * sizeof(unsigned short), indices[i].data(), GL_STATIC_DRAW);
+		EBOs.resize(totalSubmeshCount);
+		glGenVertexArrays(1, &VAO);					  // generate a Vertex Attribute Object to store vertex attribute configurations
+		glGenBuffers(1, &VBO);						  // generate a Vertex Buffer Object to store vertex data
+		glGenBuffers(totalSubmeshCount, EBOs.data()); // generate an Element Buffer Object for each submesh to store index data
+
+		glBindVertexArray(VAO); // bind the VAO first so that subsequent VBO bindings and vertex attribute configurations are stored in it correctly
+
+		glBindBuffer(GL_ARRAY_BUFFER, VBO);																 // bind the VBO
+		glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_STATIC_DRAW); // copy vertex data into the GPU buffer's memory
+
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)0); // define the layout of the vertex data (vertex attribute configuration): index 0, 3 components per vertex, type float, not normalized, with a stride of 8 * sizeof(float) (next vertex starts after 8 floats), and an offset of 0 in the buffer
+		glEnableVertexAttribArray(0);
+		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(3 * sizeof(float)));
+		glEnableVertexAttribArray(1);
+		glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(6 * sizeof(float)));
+		glEnableVertexAttribArray(2);
+
+		for (int i = 0; i < totalSubmeshCount; i++)
+		{
+			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBOs[i]);
+			glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices[i].size() * sizeof(unsigned short), indices[i].data(), GL_STATIC_DRAW);
+		}
 	}
 
 	// 7. load texture(s)
