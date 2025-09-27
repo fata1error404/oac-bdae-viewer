@@ -77,7 +77,8 @@ class TileTerrain
 	std::vector<std::pair<std::shared_ptr<Model>, glm::mat4>> models;		 // .bdae models
 	std::vector<int> textureIndices;										 // ..
 	unsigned int textureMap;												 // ..
-	Water water;															 // water surface
+	unsigned int maskTexture;
+	Water water; // water surface
 
 	float startX, startZ;							 // position on the grid in world space coordinates
 	float Y[UnitsInTileRow + 1][UnitsInTileCol + 1]; // height map (unscaled)
@@ -95,8 +96,7 @@ class TileTerrain
 		  phyVAO(0), phyVBO(0),
 		  terrainVertexCount(0),
 		  navmeshVertexCount(0),
-		  physicsVertexCount(0),
-		  BBox(VEC3(0, 0, 0), VEC3(0, 0, 0))
+		  physicsVertexCount(0)
 	{
 		memset(&chunks, 0, sizeof(chunks));
 		memset(&Y, 0, sizeof(Y));
@@ -115,6 +115,12 @@ class TileTerrain
 		{
 			glDeleteTextures(1, &textureMap);
 			textureIndices.clear();
+		}
+
+		if (maskTexture)
+		{
+			glDeleteTextures(1, &maskTexture);
+			maskTexture = 0;
 		}
 
 		trnVAO = trnVBO = navVAO = navVBO = phyVAO = phyVBO = 0;

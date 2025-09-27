@@ -810,11 +810,10 @@ void Model::draw(glm::mat4 model, glm::mat4 view, glm::mat4 projection, glm::vec
 			int meshIdx = submeshToMesh[i];
 			shader.setMat4("model", model * meshTransform[meshIdx]);
 
+			glActiveTexture(GL_TEXTURE0);
+
 			if (submeshTextureIndex[i] != -1)
-			{
-				glActiveTexture(GL_TEXTURE0);
 				glBindTexture(GL_TEXTURE_2D, textures[submeshTextureIndex[i]]);
-			}
 
 			if (alternativeTextureCount > 0 && textureCount == 1)
 				glBindTexture(GL_TEXTURE_2D, textures[selectedTexture]);

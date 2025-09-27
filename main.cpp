@@ -65,7 +65,7 @@ bool settingsPanelHovered = false; // flag that indicated whether to block backg
 bool displayBaseMesh = false;	   // flag that indicates base / textured mesh display mode
 bool displayNavMesh = false;	   // flag that indicates whether to show walkable areas
 bool displayPhysics = false;	   // flag that indicates whether to show walkable areas
-bool isTerrainViewer = false;
+bool isTerrainViewer = true;
 
 int main()
 {
