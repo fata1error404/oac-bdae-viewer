@@ -78,6 +78,8 @@ class Terrain
 
 	void getNavigationVertices(dtNavMesh *navMesh);
 
+	void loadTileMasks(CZipResReader *masksArchive, int gridX, int gridZ, TileTerrain *tile);
+
 	void loadTileNavigation(CZipResReader *navigationArchive, dtNavMesh *navMesh, int gridX, int gridZ);
 
 	void updateVisibleTiles(glm::mat4 view, glm::mat4 projection);
