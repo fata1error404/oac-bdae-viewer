@@ -53,7 +53,7 @@ void Terrain::load(const char *fpath, Sound &sound)
 			TileTerrain *tile = TileTerrain::load(trnFile, tileX, tileZ, *this); // .trn: load tile's terrain mesh data
 			loadTileEntities(itemsArchive, physicsArchive, tileX, tileZ, tile, *this);
 			loadTileMasks(masksArchive, tileX, tileZ, tile);
-			loadTileNavigation(navigationArchive, navMesh, tileX, tileZ);
+			// loadTileNavigation(navigationArchive, navMesh, tileX, tileZ);
 
 			if (tile)
 			{
@@ -134,6 +134,58 @@ void Terrain::load(const char *fpath, Sound &sound)
 	sky.load(skyName.c_str(), sound, true);
 	hill.load(hillName.c_str(), sound, true);
 
+	if (sky.modelLoaded)
+	{
+		sky.EBOs.resize(sky.totalSubmeshCount);
+		glGenVertexArrays(1, &sky.VAO);
+		glGenBuffers(1, &sky.VBO);
+		glGenBuffers(sky.totalSubmeshCount, sky.EBOs.data());
+		glBindVertexArray(sky.VAO);
+		glBindBuffer(GL_ARRAY_BUFFER, sky.VBO);
+		glBufferData(GL_ARRAY_BUFFER, sky.vertices.size() * sizeof(float), sky.vertices.data(), GL_STATIC_DRAW);
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)0);
+		glEnableVertexAttribArray(0);
+		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(3 * sizeof(float)));
+		glEnableVertexAttribArray(1);
+		glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(6 * sizeof(float)));
+		glEnableVertexAttribArray(2);
+
+		for (int i = 0; i < sky.totalSubmeshCount; i++)
+		{
+			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, sky.EBOs[i]);
+			glBufferData(GL_ELEMENT_ARRAY_BUFFER, sky.indices[i].size() * sizeof(unsigned short), sky.indices[i].data(), GL_STATIC_DRAW);
+		}
+
+		glBindVertexArray(0);
+	}
+
+	/*
+		if (hill.modelLoaded)
+		{
+			hill.EBOs.resize(hill.totalSubmeshCount);
+			glGenVertexArrays(1, &hill.VAO);
+			glGenBuffers(1, &hill.VBO);
+			glGenBuffers(hill.totalSubmeshCount, hill.EBOs.data());
+			glBindVertexArray(hill.VAO);
+			glBindBuffer(GL_ARRAY_BUFFER, hill.VBO);
+			glBufferData(GL_ARRAY_BUFFER, hill.vertices.size() * sizeof(float), hill.vertices.data(), GL_STATIC_DRAW);
+			glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)0);
+			glEnableVertexAttribArray(0);
+			glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(3 * sizeof(float)));
+			glEnableVertexAttribArray(1);
+			glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(6 * sizeof(float)));
+			glEnableVertexAttribArray(2);
+
+			for (int i = 0; i < hill.totalSubmeshCount; i++)
+			{
+				glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, hill.EBOs[i]);
+				glBufferData(GL_ELEMENT_ARRAY_BUFFER, hill.indices[i].size() * sizeof(unsigned short), hill.indices[i].data(), GL_STATIC_DRAW);
+			}
+
+			glBindVertexArray(0);
+		}
+	*/
+
 	// set camera starting point
 	if (terrainName == "pvp_forsaken_shrine")
 	{
@@ -173,15 +225,33 @@ void Terrain::load(const char *fpath, Sound &sound)
 	}
 	else if (terrainName == "1_relic's_key")
 	{
-		camera.Position = glm::vec3(-200, 100, 210);
-		camera.Pitch = -25.0f;
-		camera.Yaw = -40.0f;
+		camera.Position = glm::vec3(-222, 42, 214);
+		camera.Pitch = 0.0f;
+		camera.Yaw = -25.0f;
 	}
 	else if (terrainName == "2_knahswahs_prison")
 	{
-		camera.Position = glm::vec3(-475, 140, -2050);
-		camera.Pitch = -30.0f;
-		camera.Yaw = -125.0f;
+		camera.Position = glm::vec3(-545, 15, -2325);
+		camera.Pitch = 0.0f;
+		camera.Yaw = -90.0f;
+	}
+	else if (terrainName == "3_young_deity's_realm")
+	{
+		camera.Position = glm::vec3(-115, -8, 150);
+		camera.Pitch = 0.0f;
+		camera.Yaw = 90.0f;
+	}
+	else if (terrainName == "4_sailen_the_lower_city")
+	{
+		camera.Position = glm::vec3(1528, 12, -1080);
+		camera.Pitch = 10.0f;
+		camera.Yaw = 140.0f;
+	}
+	else if (terrainName == "6_eidolon's_horizon")
+	{
+		camera.Position = glm::vec3(-156, 53, -1600);
+		camera.Pitch = 5.0f;
+		camera.Yaw = -100.0f;
 	}
 	else if (terrainName == "tanned_land")
 	{
@@ -195,6 +265,54 @@ void Terrain::load(const char *fpath, Sound &sound)
 		camera.Pitch = 0.0f;
 		camera.Yaw = 70.0f;
 	}
+	else if (terrainName == "human_selection")
+	{
+		camera.Position = glm::vec3(1200, 120, 40);
+		camera.Pitch = -20.0f;
+		camera.Yaw = 45.0f;
+	}
+	else if (terrainName == "amusement_park1")
+	{
+		camera.Position = glm::vec3(-975, 50, -160);
+		camera.Pitch = 10.0f;
+		camera.Yaw = -280.0f;
+	}
+	else if (terrainName == "amusement_park2")
+	{
+		camera.Position = glm::vec3(1214, 7, 351);
+		camera.Pitch = 5.0f;
+		camera.Yaw = -370.0f;
+	}
+	else if (terrainName == "ghost_island")
+	{
+		camera.Position = glm::vec3(-625, 87, -590);
+		camera.Pitch = 0.0f;
+		camera.Yaw = 685.0f;
+	}
+	else if (terrainName == "flare_island")
+	{
+		camera.Position = glm::vec3(-1373, 45, -430);
+		camera.Pitch = 0.0f;
+		camera.Yaw = -50.0f;
+	}
+	else if (terrainName == "hanging_gardens")
+	{
+		camera.Position = glm::vec3(1509, 265, 805);
+		camera.Pitch = 0.0f;
+		camera.Yaw = -110.0f;
+	}
+	else if (terrainName == "polynia")
+	{
+		camera.Position = glm::vec3(901, 3, -217);
+		camera.Pitch = 6.0f;
+		camera.Yaw = -150.0f;
+	}
+	else if (terrainName == "greenmont")
+	{
+		camera.Position = glm::vec3(-183, 60, -20);
+		camera.Pitch = -21.0f;
+		camera.Yaw = 65.0f;
+	}
 
 	camera.updateCameraVectors();
 
@@ -206,6 +324,7 @@ void Terrain::load(const char *fpath, Sound &sound)
 
 	sound.searchSoundFiles(fileName, sounds);
 
+	light.showLighting = true;
 	terrainLoaded = true;
 }
 
@@ -391,21 +510,51 @@ void Terrain::releaseFromGPU(TileTerrain *tile)
 
 void Terrain::getTerrainVertices()
 {
-	// pre-load all unique .trn textures
 	unsigned int textureCount = uniqueTextureNames.size();
-	std::vector<unsigned char *> trnTextures(textureCount, NULL);
+	std::vector<unsigned char *> trnTextures(textureCount, nullptr);
 	std::vector<int> width(textureCount, 0);
 	std::vector<int> height(textureCount, 0);
-	int nrChannels;
 
-	for (int i = 0; i < textureCount; i++)
+	auto alloc_white_256 = []() -> unsigned char *
 	{
-		std::string textureName = uniqueTextureNames[i];
+		const int sz = 256 * 256 * 4;
+		unsigned char *p = (unsigned char *)malloc(sz);
+		if (p)
+			memset(p, 255, sz);
+		return p;
+	};
+
+	auto resize_to_256 = [](unsigned char *src, int srcW, int srcH) -> unsigned char *
+	{
+		const int dstW = 256, dstH = 256;
+		unsigned char *dst = (unsigned char *)malloc(dstW * dstH * 4);
+		if (!dst)
+			return nullptr;
+		for (int y = 0; y < dstH; ++y)
+		{
+			int sy = (y * srcH) / dstH;
+			for (int x = 0; x < dstW; ++x)
+			{
+				int sx = (x * srcW) / dstW;
+				unsigned char *s = src + (sy * srcW + sx) * 4;
+				unsigned char *d = dst + (y * dstW + x) * 4;
+				d[0] = s[0];
+				d[1] = s[1];
+				d[2] = s[2];
+				d[3] = s[3];
+			}
+		}
+		return dst;
+	};
+
+	// load and normalize textures to 256x256 RGBA
+	for (int ti = 0; ti < (int)textureCount; ++ti)
+	{
+		std::string textureName = uniqueTextureNames[ti];
 		std::replace(textureName.begin(), textureName.end(), '\\', '/');
 
 		const std::string needle = "texture/";
 		const std::string insertStr = "unsorted/";
-
 		if (auto pos = textureName.find(needle); pos != std::string::npos)
 		{
 			size_t ins = pos + needle.size();
@@ -415,33 +564,66 @@ void Terrain::getTerrainVertices()
 
 		textureName = "data/" + textureName;
 
-		unsigned char *data = stbi_load(textureName.c_str(), &width[i], &height[i], &nrChannels, 4);
+		int w = 0, h = 0, channels = 0;
+		unsigned char *data = stbi_load(textureName.c_str(), &w, &h, &channels, 4);
 
 		if (!data)
-			std::cout << "Failed to load texture: " << textureName << "\n";
+		{
+			std::cout << "[Warning] Failed to load texture: " << textureName << "\n"
+					  << "          Using fallback white 256x256 texture.\n";
+			trnTextures[ti] = alloc_white_256();
+			width[ti] = 256;
+			height[ti] = 256;
+		}
 		else
-			trnTextures[i] = data;
+		{
+			if (w != 256 || h != 256)
+			{
+				unsigned char *resized = resize_to_256(data, w, h);
+				if (resized)
+				{
+					stbi_image_free(data);
+					trnTextures[ti] = resized;
+					width[ti] = 256;
+					height[ti] = 256;
+					std::cout << "[Info] Resized texture " << textureName << " from " << w << "x" << h << " to 256x256.\n";
+				}
+				else
+				{
+					stbi_image_free(data);
+					trnTextures[ti] = alloc_white_256();
+					width[ti] = 256;
+					height[ti] = 256;
+					std::cout << "[Warning] Failed to resize texture: " << textureName << "\n";
+				}
+			}
+			else
+			{
+				trnTextures[ti] = data;
+				width[ti] = w;
+				height[ti] = h;
+			}
+		}
 	}
 
-	// 3. build the terrain mesh vertex data in world space coordinates (structured as triangles, which is optimal for rendering terrain surface; 1D vector with the following format: x1, y1, z1, x2, y2, z2, .. )
-
+	// 3. build the terrain mesh vertex data in world space coordinates (triangles)
 	// loop through each tile in the terrain
-	for (int i = 0; i < tilesX; i++)
+	for (int ix = 0; ix < tilesX; ix++)
 	{
-		for (int j = 0; j < tilesZ; j++)
+		for (int jx = 0; jx < tilesZ; jx++)
 		{
-			TileTerrain *tile = tiles[i][j];
-
+			TileTerrain *tile = tiles[ix][jx];
 			if (!tile)
 				continue;
 
+			// build mapping from global texture index -> layer index in this tile
 			std::unordered_map<int, int> globalToLayer;
-			for (int i = 0; i < tile->textureIndices.size(); i++)
+			for (size_t ti = 0; ti < tile->textureIndices.size(); ++ti)
 			{
-
-				globalToLayer[tile->textureIndices[i]] = i;
+				globalToLayer[tile->textureIndices[ti]] = (int)ti;
 			}
 
+			// reserve expected capacity (6 vertices per cell, 20 floats per vertex)
 			tile->terrainVertices.reserve(UnitsInTileRow * UnitsInTileCol * 6 * 20);
 
 			for (int col = 0; col < UnitsInTileCol; col++)
@@ -471,15 +653,27 @@ void Terrain::getTerrainVertices()
 					int chunkX = col / 8;
 					int chunkY = row / 8;
 					int chunkIndex = chunkX + chunkY * 8;
+					// if (chunkIndex < 0 || chunkIndex >= (int)tile->chunks.size())
+					// {
+					// 	// invalid chunk index — skip this cell
+					// 	continue;
+					// }
 					ChunkInfo &chunk = tile->chunks[chunkIndex];
 
-					float texIdx1 = -1, texIdx2 = -1, texIdx3 = -1;
+					int layer1 = -1, layer2 = -1, layer3 = -1;
+					auto it1 = globalToLayer.find(chunk.texNameIndex1);
+					if (it1 != globalToLayer.end())
+						layer1 = it1->second;
+					auto it2 = globalToLayer.find(chunk.texNameIndex2);
+					if (it2 != globalToLayer.end())
+						layer2 = it2->second;
+					auto it3 = globalToLayer.find(chunk.texNameIndex3);
+					if (it3 != globalToLayer.end())
+						layer3 = it3->second;
 
-					texIdx1 = globalToLayer[chunk.texNameIndex1];
-
-					texIdx2 = globalToLayer[chunk.texNameIndex2];
-
-					texIdx3 = globalToLayer[chunk.texNameIndex3];
+					float texIdx1 = (layer1 >= 0) ? (float)layer1 : -1.0f;
+					float texIdx2 = (layer2 >= 0) ? (float)layer2 : -1.0f;
+					float texIdx3 = (layer3 >= 0) ? (float)layer3 : -1.0f;
 
 					auto unpack_blend = [](glm::u8vec4 rgba) -> std::array<float, 4>
 					{
@@ -552,20 +746,61 @@ void Terrain::getTerrainVertices()
 				}
 			}
 
-			glGenTextures(1, &tile->textureMap);
-			glBindTexture(GL_TEXTURE_2D_ARRAY, tile->textureMap);
-			glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, GL_RGBA8, 256, 256, tile->textureIndices.size());
+			// upload textures for this tile into a texture array
+			if (!tile->textureIndices.empty())
+			{
+				glPixelStorei(GL_UNPACK_ALIGNMENT, 1); // prevent alignment issues
 
-			for (int i = 0; i < tile->textureIndices.size(); i++)
-				glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, i, 256, 256, 1, GL_RGBA, GL_UNSIGNED_BYTE, trnTextures[tile->textureIndices[i]]);
+				glGenTextures(1, &tile->textureMap);
+				glBindTexture(GL_TEXTURE_2D_ARRAY, tile->textureMap);
 
-			glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-			glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-			glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_REPEAT);
-			glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_REPEAT);
-			glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
-			glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+				int layers = (int)tile->textureIndices.size();
+				glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, GL_RGBA8, 256, 256, layers);
 
+				for (int layer = 0; layer < layers; ++layer)
+				{
+					int globalIdx = tile->textureIndices[layer];
+					if (globalIdx < 0 || globalIdx >= (int)trnTextures.size())
+					{
+						std::cout << "[Error] Texture index out of range for tile: " << globalIdx << "\n";
+						unsigned char *fallback = alloc_white_256();
+						if (fallback)
+						{
+							glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, layer, 256, 256, 1, GL_RGBA, GL_UNSIGNED_BYTE, fallback);
+							stbi_image_free(fallback);
+						}
+						continue;
+					}
+
+					unsigned char *imgptr = trnTextures[globalIdx];
+					if (!imgptr)
+					{
+						std::cout << "[Warning] trnTextures[" << globalIdx << "] == NULL; using fallback\n";
+						unsigned char *fallback = alloc_white_256();
+						if (fallback)
+						{
+							glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, layer, 256, 256, 1, GL_RGBA, GL_UNSIGNED_BYTE, fallback);
+							stbi_image_free(fallback);
+						}
+						continue;
+					}
+
+					// all trnTextures entries are guaranteed to be 256x256x4 bytes
+					glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, layer, 256, 256, 1, GL_RGBA, GL_UNSIGNED_BYTE, imgptr);
+				}
+
+				glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+				glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+				glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_REPEAT);
+				glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+				// levels == 1 used in glTexStorage3D, so do not call glGenerateMipmap.
+				glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+
+				glPixelStorei(GL_UNPACK_ALIGNMENT, 4); // restore default
+			}
+
+			// set vertex count (20 floats per vertex)
 			if (tile->terrainVertices.empty())
 				tile->terrainVertexCount = 0;
 			else
@@ -573,7 +808,7 @@ void Terrain::getTerrainVertices()
 		}
 	}
 
-	// free CPU image data
+	// free CPU image data (works with stbi_image_free for data allocated by stbi or malloc)
 	for (auto ptr : trnTextures)
 		if (ptr)
 			stbi_image_free(ptr);
@@ -665,7 +900,7 @@ void Terrain::loadTileMasks(CZipResReader *masksArchive, int gridX, int gridZ, T
 	if (!readFileToBuf(name0, buf0))
 	{
 		// required file missing or wrong size — bail out
-		std::cout << "[Warning] missing or invalid primary mask " << name0 << " for tile " << gridX << "," << gridZ << std::endl;
+		// std::cout << "[Warning] missing or invalid primary mask " << name0 << " for tile " << gridX << "," << gridZ << std::endl;
 		return;
 	}
 
@@ -1416,68 +1651,72 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool rende
 		if (!tile)
 			continue;
 
-		if (tile->trnVAO == 0 || tile->trnVBO == 0)
+		if (tile->trnVAO == 0 || tile->trnVBO == 0 || tile->terrainVertexCount == 0 || !tile->textureMap)
 			continue;
 
 		glBindVertexArray(tile->trnVAO);
 
-		// Bind terrain array
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D_ARRAY, tile->textureMap);
 
-		// Bind mask texture
-		glActiveTexture(GL_TEXTURE1);
-		glBindTexture(GL_TEXTURE_2D, tile->maskTexture);
+		if (tile->maskTexture)
+		{
+			glActiveTexture(GL_TEXTURE1);
+			glBindTexture(GL_TEXTURE_2D, tile->maskTexture);
+		}
+
 		glDrawArrays(GL_TRIANGLES, 0, tile->terrainVertexCount);
 		glBindVertexArray(0);
 	}
 
-	// render walkable surfaces
-	if (renderNavMesh)
-	{
-		shader.setInt("renderMode", 5);
-
-		for (TileTerrain *tile : tilesVisible)
+	/*
+		// render walkable surfaces
+		if (renderNavMesh)
 		{
-			if (!tile)
-				continue;
+			shader.setInt("renderMode", 5);
 
-			if (tile->navVAO == 0 || tile->navVBO == 0)
-				continue;
+			for (TileTerrain *tile : tilesVisible)
+			{
+				if (!tile)
+					continue;
 
-			glBindVertexArray(tile->navVAO);
+				if (tile->navVAO == 0 || tile->navVBO == 0)
+					continue;
 
-			glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-			glDrawArrays(GL_TRIANGLES, 0, tile->navmeshVertexCount);
+				glBindVertexArray(tile->navVAO);
 
-			glBindVertexArray(0);
+				glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+				glDrawArrays(GL_TRIANGLES, 0, tile->navmeshVertexCount);
+
+				glBindVertexArray(0);
+			}
 		}
-	}
 
-	// render physics
-	if (renderPhysics)
-	{
-		for (TileTerrain *tile : tilesVisible)
+		// render physics
+		if (renderPhysics)
 		{
-			if (!tile)
-				continue;
+			for (TileTerrain *tile : tilesVisible)
+			{
+				if (!tile)
+					continue;
 
-			if (tile->phyVAO == 0 || tile->phyVBO == 0)
-				continue;
+				if (tile->phyVAO == 0 || tile->phyVBO == 0)
+					continue;
 
-			glBindVertexArray(tile->phyVAO);
+				glBindVertexArray(tile->phyVAO);
 
-			shader.setInt("renderMode", 4);
-			glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-			glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
+				shader.setInt("renderMode", 4);
+				glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+				glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
 
-			shader.setInt("renderMode", 2);
-			glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-			glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
+				shader.setInt("renderMode", 2);
+				glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+				glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
 
-			glBindVertexArray(0);
+				glBindVertexArray(0);
+			}
 		}
-	}
+	*/
 
 	// render water and 3D models
 	for (TileTerrain *tile : tilesVisible)
@@ -1487,14 +1726,15 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool rende
 
 		tile->water.draw(view, projection, light.showLighting, simple, dt, camera.Position);
 
+		if (tile->models.empty())
+			continue;
+
 		for (auto &mi : tile->models)
 		{
 			const std::shared_ptr<Model> &m = mi.first;
 			const glm::mat4 &instModel = mi.second;
 
 			if (!m)
-				continue;
-			if (!m->modelLoaded)
 				continue;
 
 			m->draw(instModel, view, projection, camera.Position, light.showLighting, simple);

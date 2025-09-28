@@ -78,6 +78,7 @@ int Model::init(IReadResFile *file)
 	memcpy(&nodeCollectionCount, ptr + 72, sizeof(int));
 	memcpy(&nodeCollectionInfoOffset, ptr + 76, sizeof(int));
 
+	LOG("\033[37m[Init] Parsing data section. Retrieving texture, material, mesh and node info.\033[0m");
 	LOG("\nTEXTURES: ", ((textureCount != 0) ? std::to_string(textureCount) : "0, file name will be used as a texture name"));
 
 	BDAEint materialNameOffset[materialCount];
@@ -182,7 +183,7 @@ int Model::init(IReadResFile *file)
 		memcpy(&bytesPerVertex[i], DataBuffer + meshMetadataOffset[i] + 44, sizeof(int));
 		memcpy(&meshVertexDataOffset[i], DataBuffer + meshMetadataOffset[i] + 80, sizeof(int));
 #else
-		memcpy(&nameOffset, DataBuffer + header->offsetData + 120 + 4 + meshInfoOffset + i * 24 + 8, sizeof(BDAEint));
+		memcpy(&nameOffset, DataBuffer + header->offsetData + 120 + 4 + meshInfoOffset + i * 24, sizeof(BDAEint));
 		memcpy(&meshMetadataOffset[i], DataBuffer + header->offsetData + 120 + 4 + meshInfoOffset + 20 + i * 24, sizeof(int));
 		memcpy(&meshVertexCount[i], DataBuffer + header->offsetData + 120 + 4 + meshInfoOffset + 20 + i * 24 + meshMetadataOffset[i] + 4, sizeof(int));
 		memcpy(&submeshCount[i], DataBuffer + header->offsetData + 120 + 4 + meshInfoOffset + 20 + i * 24 + meshMetadataOffset[i] + 12, sizeof(int));
@@ -233,7 +234,10 @@ int Model::init(IReadResFile *file)
 	// 3.3 NODES (nodes are parsed to correctly position meshes within a model)
 	// ____________________
 
-	LOG("\nNODES: ", meshCount);
+	if (nodeCollectionCount > 1)
+		LOG("[Warning] Model::init: > 1 node collections.");
+
+	int node2meshCount = 0;
 
 	int nodeCount[nodeCollectionCount];
 	int nodeMetadataOffset[nodeCollectionCount];
@@ -248,6 +252,9 @@ int Model::init(IReadResFile *file)
 		memcpy(&nodeMetadataOffset[i], DataBuffer + header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 20 + i * 24, sizeof(int));
 #endif
 
+		if (i == 0)
+			LOG("\nNODES: ", nodeCount[i]);
+
 		for (int k = 0; k < nodeCount[i]; k++)
 		{
 			BDAEint nameOffset;
@@ -259,28 +266,40 @@ int Model::init(IReadResFile *file)
 			memcpy(&isVisible, DataBuffer + nodeMetadataOffset[i] + k * 80 + 52, sizeof(int));
 			int nodeInfoOffset = nodeMetadataOffset[i] + k * 80;
 #else
-			memcpy(&nameOffset, DataBuffer + header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 20 + i * 24 + nodeMetadataOffset[i] + k * 96 + 8, sizeof(BDAEint));
+			memcpy(&nameOffset, DataBuffer + header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 20 + i * 24 + nodeMetadataOffset[i] + k * 96, sizeof(BDAEint));
 			memcpy(&isVisible, DataBuffer + header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 20 + i * 24 + nodeMetadataOffset[i] + k * 96 + 64, sizeof(int));
 			int nodeInfoOffset = header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 20 + i * 24 + nodeMetadataOffset[i] + k * 96;
 #endif
 			memcpy(&nameLength, DataBuffer + nameOffset - 4, sizeof(int));
 			std::string nodeMeshName(DataBuffer + nameOffset, nameLength);
 
+			int pos = (int)nodeMeshName.find("-node");
+			if (pos != -1)
+				nodeMeshName.replace(pos, 5, "-mesh");
+
 			auto it = std::find(std::begin(meshName), std::end(meshName), nodeMeshName);
 
 			if (it != meshName.end())
 			{
-				LOG("[", k, "] node --> [", std::distance(meshName.begin(), it), "] mesh");
+				LOG("[", k + 1, "] node --> [", std::distance(meshName.begin(), it) + 1, "] mesh");
 
 				int meshIdx = std::distance(meshName.begin(), it);
 				getNodeTransformation(nodeInfoOffset, meshIdx);
+
+				node2meshCount++;
+
+				// stop early if every mesh already has exactly one node assigned ([TODO] questionable approach)
+				if (nodeCollectionCount == 1 && node2meshCount == meshCount)
+					break;
 			}
 			else
-				LOG("[Warning] Model::init: mesh name ", nodeMeshName, " for node [", k, "] not found!");
+				LOG("[Warning] Model::init: mesh name ", nodeMeshName, " for node [", k + 1, "] not found!");
 		}
 	}
 
 	// 4. parse removable section: build vertex and index data for each mesh; all vertex data is stored in a single flat vector, while index data is stored in separate vectors for each submesh
+	LOG("\n\033[37m[Init] Parsing removable section. Building vertex and index data.\033[0m");
+
 	indices.resize(totalSubmeshCount);
 	int currentSubmeshIndex = 0;
 
@@ -326,6 +345,10 @@ int Model::init(IReadResFile *file)
 		}
 	}
 
+	vertexCount = vertices.size() / 8;
+
+	LOG("\033[1m\033[38;2;200;200;200m[Init] Finishing Model::init..\033[0m\n");
+
 	delete header;
 	return 0;
 }
@@ -365,6 +388,10 @@ void Model::getNodeTransformation(int nodeInfoOffset, int nodeMeshIdx)
 
 	if (childrenOffset != 0)
 		childrenOffset += nodeInfoOffset + 72;
+
+	// [TODO] yeah you see it
+	if (fileName == "pvp_flag03.bdae" || fileName == "pvp_flag04.bdae")
+		transY = 3.0f;
 #endif
 
 	// translate -> rotate -> scale
@@ -405,6 +432,12 @@ void Model::load(const char *fpath, Sound &sound, bool isTerrainViewer)
 		return;
 	}
 
+	LOG("\033[1m\033[97mLoading ", fpath, "\033[0m");
+
+	std::string modelPath(fpath);
+	std::replace(modelPath.begin(), modelPath.end(), '\\', '/');	// normalize model path for cross-platform compatibility (Windows uses '\', Linux uses '/')
+	fileName = modelPath.substr(modelPath.find_last_of("/\\") + 1); // file name is after the last path separator in the full path
+
 	// 2. run the parser
 	int result = init(bdaeFile);
 
@@ -414,6 +447,8 @@ void Model::load(const char *fpath, Sound &sound, bool isTerrainViewer)
 		delete bdaeArchive;
 		return;
 	}
+
+	LOG("\n\033[37m[Load] BDAE initialization success.\033[0m");
 
 	if (!isTerrainViewer) // 3D model viewer
 	{
@@ -430,10 +465,6 @@ void Model::load(const char *fpath, Sound &sound, bool isTerrainViewer)
 		meshCenter /= (vertices.size() / 8);
 
 		// 3. process strings retrieved from .bdae
-		std::string modelPath(fpath);
-		std::replace(modelPath.begin(), modelPath.end(), '\\', '/'); // normalize model path for cross-platform compatibility (Windows uses '\', Linux uses '/')
-
-		// retrieve model subpath
 		const char *subpathStart = std::strstr(modelPath.c_str(), "/model/") + 7; // subpath starts after '/model/' (texture and model files have the same subpath, e.g. 'creature/pet/')
 		const char *subpathEnd = std::strrchr(modelPath.c_str(), '/') + 1;		  // last '/' before the file name
 		std::string textureSubpath(subpathStart, subpathEnd);
@@ -473,10 +504,6 @@ void Model::load(const char *fpath, Sound &sound, bool isTerrainViewer)
 			else
 				s = "data/texture/unsorted/" + s;
 		}
-
-		// set file info to be displayed in the settings panel
-		fileName = modelPath.substr(modelPath.find_last_of("/\\") + 1); // file name is after the last path separator in the full path
-		vertexCount = vertices.size() / 8;
 
 		// if a texture file matching the model file name exists, override the parsed texture (for single-texture models only)
 		std::string s = "data/texture/" + textureSubpath + fileName;
@@ -659,6 +686,8 @@ void Model::load(const char *fpath, Sound &sound, bool isTerrainViewer)
 	}
 	else // terrain viewer
 	{
+		LOG("\033[37m[Load] Terrain viewer mode. Post-processing texture names.\033[0m");
+
 		for (int i = 0, n = (int)textureNames.size(); i < n; i++)
 		{
 			std::string &s = textureNames[i];
@@ -685,6 +714,7 @@ void Model::load(const char *fpath, Sound &sound, bool isTerrainViewer)
 	// 6. setup buffers
 	if (!isTerrainViewer)
 	{
+		LOG("\n\033[37m[Load] Uploading vertex data to GPU.\033[0m");
 		EBOs.resize(totalSubmeshCount);
 		glGenVertexArrays(1, &VAO);					  // generate a Vertex Attribute Object to store vertex attribute configurations
 		glGenBuffers(1, &VBO);						  // generate a Vertex Buffer Object to store vertex data
@@ -710,6 +740,8 @@ void Model::load(const char *fpath, Sound &sound, bool isTerrainViewer)
 	}
 
 	// 7. load texture(s)
+	LOG("\033[37m[Load] Uploading textures to GPU.\033[0m");
+
 	textures.resize(textureNames.size());
 	glGenTextures(textureNames.size(), textures.data()); // generate and store texture ID(s)
 
@@ -741,6 +773,7 @@ void Model::load(const char *fpath, Sound &sound, bool isTerrainViewer)
 	}
 
 	modelLoaded = true;
+	LOG("\033[1m\033[38;2;200;200;200m[Load] BDAE model loaded.\033[0m\n");
 }
 
 //! Clears GPU memory and resets viewer state.
@@ -755,13 +788,13 @@ void Model::reset()
 
 	if (!EBOs.empty())
 	{
-		glDeleteBuffers(totalSubmeshCount, EBOs.data());
+		glDeleteBuffers(EBOs.size(), EBOs.data());
 		EBOs.clear();
 	}
 
 	if (!textures.empty())
 	{
-		glDeleteTextures(textureCount + alternativeTextureCount, textures.data());
+		glDeleteTextures(textures.size(), textures.data());
 		textures.clear();
 	}
 
@@ -779,7 +812,7 @@ void Model::reset()
 //! Renders .bdae model.
 void Model::draw(glm::mat4 model, glm::mat4 view, glm::mat4 projection, glm::vec3 cameraPos, bool lighting, bool simple)
 {
-	if (!modelLoaded)
+	if (!modelLoaded || EBOs.empty())
 		return;
 
 	if (meshCenter != glm::vec3(-1.0f)) // = if using 3D model viewer, where mesh center is initialized
@@ -808,15 +841,31 @@ void Model::draw(glm::mat4 model, glm::mat4 view, glm::mat4 projection, glm::vec
 		for (int i = 0; i < totalSubmeshCount; i++)
 		{
 			int meshIdx = submeshToMesh[i];
+
+			if (meshIdx < 0 || meshIdx >= (int)meshTransform.size())
+			{
+				std::cout << "[Warning] Model::draw: skipping submesh [" << i << "] --> invalid mesh index [" << meshIdx << "]" << std::endl;
+				continue;
+			}
+
 			shader.setMat4("model", model * meshTransform[meshIdx]);
-
 			glActiveTexture(GL_TEXTURE0);
-
-			if (submeshTextureIndex[i] != -1)
-				glBindTexture(GL_TEXTURE_2D, textures[submeshTextureIndex[i]]);
 
 			if (alternativeTextureCount > 0 && textureCount == 1)
 				glBindTexture(GL_TEXTURE_2D, textures[selectedTexture]);
+
+			if (textureCount > 1)
+			{
+				if (submeshTextureIndex[i] == -1)
+				{
+					std::cout << "[Warning] Model::draw: skipping submesh [" << i << "] --> invalid texture index [" << submeshTextureIndex[i] << "]" << std::endl;
+					continue;
+				}
+
+				glBindTexture(GL_TEXTURE_2D, textures[submeshTextureIndex[i]]);
+			}
+			else
+				glBindTexture(GL_TEXTURE_2D, textures[0]);
 
 			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBOs[i]);
 			glDrawElements(GL_TRIANGLES, indices[i].size(), GL_UNSIGNED_SHORT, 0);

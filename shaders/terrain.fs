@@ -26,18 +26,35 @@ out vec4 FragColor;
 
 void main()
 {
-    if (renderMode == 1)
-    {
+if (renderMode == 1)
+{
         vec4 color1 = texture(baseTextureArray, vec3(TexCoord1, TexIdx1));
         vec4 color2 = texture(baseTextureArray, vec3(TexCoord1, TexIdx2));
         vec4 color3 = texture(baseTextureArray, vec3(TexCoord1, TexIdx3));
         vec4 mask = texture(maskTexture, TexCoord2);
 
-        // [TODO] by far without blend weights it matches source code formula
-        vec3 baseColor =
-            color1.rgb * TexBlendWeights.b * (1.0 - mask.r - mask.g) +
-            color2.rgb * TexBlendWeights.r * mask.r +
-            color3.rgb * TexBlendWeights.g * mask.g;
+        // clamp mask channels to safe range
+        float mr = clamp(mask.r, 0.0, 1.0);
+        float mg = clamp(mask.g, 0.0, 1.0);
+        float mb = clamp(mask.b, 0.0, 1.0);
+
+        float w1 = TexBlendWeights.b * max(0.0, 1.0 - mr - mg); // base layer
+        float w2 = TexBlendWeights.r * mr;                     // red layer
+        float w3 = TexBlendWeights.g * mg;                     // green layer
+
+        // normalize weights to avoid division by zero and preserve color energy
+        float sumW = w1 + w2 + w3;
+        const float EPS = 1e-6;
+        vec3 blended;
+        if (sumW > EPS)
+        {
+            blended = (color1.rgb * w1 + color2.rgb * w2 + color3.rgb * w3) / sumW;
+        }
+        else
+        {
+            // fallback: use color1 if weights are effectively zero
+            blended = color1.rgb;
+        }
 
         if (lighting)
         {
@@ -45,14 +62,19 @@ void main()
             vec3 L = normalize(lightPos - PosWorldSpace);
             float diff = max(dot(N, L), 0.0);
 
-            vec3 ambient = 0.2 * lightColor;
+            vec3 ambient = 0.2 * lightColor;   // use your uniforms
             vec3 diffuse = 0.5 * lightColor * diff;
 
-            float shadow = 1.0 - texture(maskTexture, TexCoord2).b;
-            baseColor = (ambient + diffuse) * shadow * baseColor ;
+            // shadow application: reduce brightness based on mask.b but do not zero-out
+            // shadowStrength in [0,1] controls how strong the shadow channel is
+            float shadowStrength = 1.0; // tweak: 1.0 = full effect, 0.5 = half
+            float shadow = mix(1.0, 1.0 - mb * shadowStrength, 1.0); // result in (0,1]
+            vec3 lightingTerm = ambient + diffuse;
+
+            blended = lightingTerm * shadow * blended;
         }
 
-        FragColor = vec4(baseColor, 1.0);
+        FragColor = vec4(blended, 1.0);
     }
     else if (renderMode == 2)
         FragColor = vec4(0.4f, 0.2f, 0.1f, 1.0f);

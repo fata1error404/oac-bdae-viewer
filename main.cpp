@@ -65,7 +65,7 @@ bool settingsPanelHovered = false; // flag that indicated whether to block backg
 bool displayBaseMesh = false;	   // flag that indicates base / textured mesh display mode
 bool displayNavMesh = false;	   // flag that indicates whether to show walkable areas
 bool displayPhysics = false;	   // flag that indicates whether to show walkable areas
-bool isTerrainViewer = true;
+bool isTerrainViewer = false;
 
 int main()
 {
@@ -285,15 +285,15 @@ int main()
 			ImGui::NewLine();
 			ImGui::Checkbox("Base Mesh (K)", &displayBaseMesh);
 			ImGui::Spacing();
-			ImGui::Checkbox("Walkable (N)", &displayNavMesh);
-			ImGui::Spacing();
-			ImGui::Checkbox("Physics (M)", &displayPhysics);
-			ImGui::Spacing();
+			// ImGui::Checkbox("Walkable (N)", &displayNavMesh);
+			// ImGui::Spacing();
+			// ImGui::Checkbox("Physics (M)", &displayPhysics);
+			// ImGui::Spacing();
 			ImGui::Checkbox("Lighting (L)", &ourLight.showLighting);
 			ImGui::NewLine();
 			ImGui::TextWrapped("Terrain: %d x %d tiles", terrainModel.tilesX, terrainModel.tilesZ);
-			ImGui::NewLine();
-			ImGui::TextWrapped("Pitch: %.2f, Yaw: %.2f", ourCamera.Pitch, ourCamera.Yaw);
+			// ImGui::NewLine();
+			// ImGui::TextWrapped("Pitch: %.2f, Yaw: %.2f", ourCamera.Pitch, ourCamera.Yaw);
 			ImGui::Text("Position: (x, y, z)");
 			ImGui::Spacing();
 

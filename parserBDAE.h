@@ -84,6 +84,7 @@ class Model
 
 	Model(const char *vertex, const char *fragment)
 		: shader(vertex, fragment),
+		  totalSubmeshCount(0),
 		  VAO(0), VBO(0),
 		  modelLoaded(false),
 		  meshCenter(glm::vec3(-1.0f)),

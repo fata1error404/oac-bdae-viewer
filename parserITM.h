@@ -131,23 +131,25 @@ inline void loadEntity(CZipResReader *physicsArchive, const char *fname, const E
 		// 3. load .phy model
 		// ____________________
 
-		Physics *physicsGeom = Physics::load(physicsArchive, fname); // returned pointer is the first submesh (head node) in linked list
+		/*
+			Physics *physicsGeom = Physics::load(physicsArchive, fname); // returned pointer is the first submesh (head node) in linked list
 
-		if (physicsGeom)
-		{
-			// build a model matrix that transforms the entity from local to world space coordinates
-			MTX4 model;
-			entityInfo.rotation.getMatrix(model);
+			if (physicsGeom)
+			{
+				// build a model matrix that transforms the entity from local to world space coordinates
+				MTX4 model;
+				entityInfo.rotation.getMatrix(model);
 
-			if (entityInfo.scale != VEC3(1.0f, 1.0f, 1.0f))
-				model.postScale(entityInfo.scale);
+				if (entityInfo.scale != VEC3(1.0f, 1.0f, 1.0f))
+					model.postScale(entityInfo.scale);
 
-			model.setTranslation(entityInfo.relativePos + tileOff);
+				model.setTranslation(entityInfo.relativePos + tileOff);
 
-			physicsGeom->buildModelMatrix(model); // apply local2world transformation to entity's geometry
+				physicsGeom->buildModelMatrix(model); // apply local2world transformation to entity's geometry
 
-			tile->physicsGeometry.push_back(physicsGeom); // add a new physics geometry to TileTerrain object
-		}
+				tile->physicsGeometry.push_back(physicsGeom); // add a new physics geometry to TileTerrain object
+			}
+		*/
 
 		break;
 	}
@@ -180,7 +182,7 @@ inline void loadEntity(CZipResReader *physicsArchive, const char *fname, const E
 			bdaeModelCache[fname] = bdaeModel; // add to global cache with filename as a key for quick lookup
 		}
 		else
-			std::cout << "[Debug] loadEntity: failed to load " << fname << std::endl;
+			std::cout << "[Warning] Failed to load 3D model: " << fname << std::endl;
 	}
 
 	if (bdaeModel)

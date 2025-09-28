@@ -11,7 +11,7 @@ const glm::vec3 lightColor(1.0f);			  // white color
 const float ambientStrength = 0.5f;
 const float diffuseStrength = 0.6f;
 const float specularStrength = 0.5f;
-const float waterAmbientStrength = 0.2f;
+const float waterAmbientStrength = 0.8f;
 const float waterDiffuseStrength = 0.5f;
 const float waterSpecularStrength = 0.5f;
 
@@ -25,7 +25,7 @@ class Light
 
 	Light()
 		: shader("shaders/lightcube.vs", "shaders/lightcube.fs"),
-		  showLighting(true)
+		  showLighting(false)
 	{
 		shader.use();
 		shader.setMat4("model", glm::translate(glm::mat4(1.0f), lightPos));
