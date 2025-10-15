@@ -11,8 +11,8 @@
 const float waterTextureSpeed = 0.5f;
 const float waterTextureScale = 0.8f;
 
-// Class for loading water.
-// ________________________
+// Class for loading and rendering water.
+// ______________________________________
 
 class Water
 {
@@ -69,11 +69,7 @@ class Water
 
 	void draw(glm::mat4 view, glm::mat4 projection, bool lighting, bool simple, float dt, glm::vec3 camera)
 	{
-		if (vertices.empty())
-			return;
-		if (VAO == 0 || VBO == 0)
-			return;
-		if (waterVertexCount == 0)
+		if (VAO == 0 || VBO == 0 || waterVertexCount == 0 || vertices.empty())
 			return;
 
 		shader.use();

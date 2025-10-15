@@ -1,8 +1,6 @@
 #ifndef PARSER_TERRAIN_H
 #define PARSER_TERRAIN_H
 
-// [TODO] annotate
-
 #include <string>
 #include <vector>
 #include "libs/glm/glm.hpp"
@@ -20,12 +18,10 @@
 #include "CZipResReader.h"
 #include "DetourNavMesh.h"
 
-const int visibleRadiusTiles = 4; // 3 tiles each direction -> (2*2+1)^2 = 25 tiles
-
 class TileTerrain;
 
-// Class for loading terrain.
-// __________________________
+// Class for loading and rendering terrain.
+// ________________________________________
 
 class Terrain
 {
@@ -45,7 +41,7 @@ class Terrain
 	int tilesX, tilesZ;							   // terrain size in tiles
 	bool terrainLoaded;
 
-	std::vector<std::string> uniqueTextureNames; // global unique texture names
+	std::vector<std::string> uniqueTextureNames; // global unique texture names for terrain surface
 
 	Terrain(Camera &cam, Light &light)
 		: shader("shaders/terrain.vs", "shaders/terrain.fs"),
@@ -63,32 +59,41 @@ class Terrain
 		shader.setFloat("ambientStrength", ambientStrength);
 		shader.setFloat("diffuseStrength", diffuseStrength);
 		shader.setFloat("specularStrength", specularStrength);
+		shader.setInt("baseTextureArray", 0);
+		shader.setInt("maskTexture", 1);
 	};
 
 	~Terrain() { reset(); }
 
-	//! Loads .zip file from disk, performs parsing for each contained .trn file, sets up terrain mesh data and sound.
+	//! CPU-side map loading (called once on map startup, pre-loads all tiles for selected map): opens resource archives, calls parsers for each asset type and each map's tile, then builds vertex and index data.
 	void load(const char *fpath, Sound &sound);
 
-	void getTerrainVertices();
-
-	void getWaterVertices();
-
-	void getPhysicsVertices();
-
-	void getNavigationVertices(dtNavMesh *navMesh);
-
+	//! Processes .msk and .shw files for a terrain tile and packs all 3 mask layers in 1 texture where each channel encodes the whole layer (R → primary mask, G → secondary mask, B → pre-rendered shadows).
 	void loadTileMasks(CZipResReader *masksArchive, int gridX, int gridZ, TileTerrain *tile);
 
+	//! Processes a single .nav file of a terrain tile and adds its data to the Detour navigation system.
 	void loadTileNavigation(CZipResReader *navigationArchive, dtNavMesh *navMesh, int gridX, int gridZ);
 
+	//! Builds terrain surface vertex data for each square unit and loads textures (terrain is rendered per square unit, however some data is defined per chunk or even per tile, so it must be mapped to square units).
+	void getTerrainVertices();
+
+	//! Builds flat water surface vertex data for each terrain chunk that contains water (water is defined and rendered per chunk, not per unit).
+	void getWaterVertices();
+
+	// void getPhysicsVertices();
+
+	// void getNavigationVertices(dtNavMesh *navMesh);
+
+	//! Uploads tile to GPU (GPU-side tile loading, called per-frame for all tiles that need to be activated).
+	void activateTile(TileTerrain *tile);
+
+	//! Releases tile from GPU.
+	void deactivateTile(TileTerrain *tile);
+
+	//! Computes which tiles will be rendered in the current frame based on camera position and orientation (distance-based culling + frustum culling).
 	void updateVisibleTiles(glm::mat4 view, glm::mat4 projection);
 
-	void uploadToGPU(TileTerrain *tile);
-
-	void releaseFromGPU(TileTerrain *tile);
-
-	//! Clears GPU memory and resets viewer state.
+	//! Clears CPU memory (resets viewer state).
 	void reset();
 
 	//! Renders terrain (.trn + .phy + .nav + .bdae).

@@ -14,7 +14,7 @@
 
 class MTX4
 {
-public:
+  public:
 	// constructor Flags
 	enum eConstructor
 	{
@@ -393,7 +393,7 @@ public:
 		M[15] = float(1);
 	}
 
-private:
+  private:
 	float M[16];						   // matrix data, stored in row-major order
 	mutable bool definitelyIdentityMatrix; // flag is this matrix is identity matrix
 };

@@ -22,6 +22,10 @@
 
 #define DEFAULT_LOAD_BUFFER_SIZE 102400 // 100 KB
 
+const int visibleRadiusTiles = 4;																						// (2r + 1)^2 = (2 * 4 + 1)^2 = 81 visible tiles around the camera
+const float loadRadiusSq = (visibleRadiusTiles * UnitsInTileRow) * (visibleRadiusTiles * UnitsInTileRow);				// squared loading radius in world space units
+const float unloadRadiusSq = ((visibleRadiusTiles + 2) * UnitsInTileRow) * ((visibleRadiusTiles + 2) * UnitsInTileRow); // squared unloading radius in world space units (+2 margin prevents visual lag)
+
 static unsigned char loadBuffer[DEFAULT_LOAD_BUFFER_SIZE]; // static read buffer to load .trn files into memory without dynamic allocation
 
 static std::unordered_map<std::string, std::shared_ptr<Model>> bdaeModelCache; // terrain's global cache for .bdae models (key — filename, value — shared pointer)
@@ -78,6 +82,7 @@ class TileTerrain
 	unsigned int textureMap;												 // .trn textures
 	unsigned int maskTexture;												 // .msk + .shw mask layers texture
 	Water water;															 // water surface
+	bool activated;															 // flag that indicates whether a tile is uploaded to GPU
 
 	std::vector<int> textureIndices;				 // indices of all tile's texture names in terrain's global list
 	float startX, startZ;							 // position on the grid in world space coordinates
@@ -98,7 +103,8 @@ class TileTerrain
 		  navmeshVertexCount(0),
 		  physicsVertexCount(0),
 		  textureMap(0),
-		  maskTexture(0)
+		  maskTexture(0),
+		  activated(false)
 	{
 		memset(&chunks, 0, sizeof(chunks));
 		memset(&Y, 0, sizeof(Y));
@@ -139,7 +145,7 @@ class TileTerrain
 		water.release();
 	}
 
-	//! Processes a single .trn file and returns a newly created TileTerrain object with the tile's mesh data saved.
+	//! Processes a single .trn file of a terrain tile and returns a newly created TileTerrain object with the tile's terrain surface data saved.
 	static TileTerrain *load(IReadResFile *trnFile, int &gridX, int &gridZ, Terrain &terrain);
 };
 

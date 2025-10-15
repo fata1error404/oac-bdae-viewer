@@ -21,7 +21,7 @@ inline bool iszero_float(const float a, const float tolerance = ROUNDING_ERROR_3
 
 class VEC3
 {
-public:
+  public:
 	// vector components
 	float X;
 	float Y;

@@ -1,7 +1,7 @@
 #include "parserTRN.h"
 #include "terrain.h"
 
-//! Processes a single .trn file and returns a newly created TileTerrain object with the tile's mesh data saved.
+//! Processes a single .trn file of a terrain tile and returns a newly created TileTerrain object with the tile's terrain surface data saved.
 TileTerrain *TileTerrain::load(IReadResFile *trnFile, int &gridX, int &gridZ, Terrain &terrain)
 {
 	// 1. load .trn file into memory

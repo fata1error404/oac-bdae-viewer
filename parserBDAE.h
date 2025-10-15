@@ -53,8 +53,8 @@ struct BDAEFileHeader
 	unsigned int sizeOfDynamic;								// 4 bytes  size of dynamic chunk (?)
 };
 
-// Class for loading 3D model.
-// ___________________________
+// Class for loading and rendering 3D model.
+// _________________________________________
 
 class Model
 {

@@ -50,10 +50,10 @@ int Model::init(IReadResFile *file)
 
 	memcpy(DataBuffer, header, headerSize); // copy header
 
-	LOG("\n\033[37m[Init] At position ", file->getPos(), ", reading offset, string, data and removable sections..\033[0m");
+	LOG("\n\033[37m[Init] At position ", file->getPos(), ", reading offset, string, model info and model data sections..\033[0m");
 	file->read(DataBuffer + headerSize, sizeUnRemovable - headerSize); // insert after header
 
-	// 3. parse data section: retrieve texture, material, mesh and node info
+	// 3. parse model info section: retrieve texture, material, mesh and node info
 
 	// 3.1 TEXTURES AND MATERIALS (materials are parsed to match submesh with texture)
 	// ____________________
@@ -78,7 +78,7 @@ int Model::init(IReadResFile *file)
 	memcpy(&nodeCollectionCount, ptr + 72, sizeof(int));
 	memcpy(&nodeCollectionInfoOffset, ptr + 76, sizeof(int));
 
-	LOG("\033[37m[Init] Parsing data section. Retrieving texture, material, mesh and node info.\033[0m");
+	LOG("\033[37m[Init] Parsing model info section. Retrieving texture, material, mesh and node info.\033[0m");
 	LOG("\nTEXTURES: ", ((textureCount != 0) ? std::to_string(textureCount) : "0, file name will be used as a texture name"));
 
 	BDAEint materialNameOffset[materialCount];
@@ -297,8 +297,8 @@ int Model::init(IReadResFile *file)
 		}
 	}
 
-	// 4. parse removable section: build vertex and index data for each mesh; all vertex data is stored in a single flat vector, while index data is stored in separate vectors for each submesh
-	LOG("\n\033[37m[Init] Parsing removable section. Building vertex and index data.\033[0m");
+	// 4. parse model data section: build vertex and index data for each mesh; all vertex data is stored in a single flat vector, while index data is stored in separate vectors for each submesh
+	LOG("\n\033[37m[Init] Parsing model data section. Building vertex and index data.\033[0m");
 
 	indices.resize(totalSubmeshCount);
 	int currentSubmeshIndex = 0;
@@ -322,8 +322,8 @@ int Model::init(IReadResFile *file)
 			vertices.push_back(vertex[4]); // Ny
 			vertices.push_back(vertex[5]); // Nz
 
-			vertices.push_back(vertex[6]); // S
-			vertices.push_back(vertex[7]); // T
+			vertices.push_back(vertex[6]); // U
+			vertices.push_back(vertex[7]); // V
 		}
 
 		for (int k = 0; k < submeshCount[i]; k++)
@@ -716,7 +716,7 @@ void Model::load(const char *fpath, Sound &sound, bool isTerrainViewer)
 	{
 		LOG("\n\033[37m[Load] Uploading vertex data to GPU.\033[0m");
 		EBOs.resize(totalSubmeshCount);
-		glGenVertexArrays(1, &VAO);					  // generate a Vertex Attribute Object to store vertex attribute configurations
+		glGenVertexArrays(1, &VAO);					  // generate a Vertex Array Object to store vertex attribute configurations
 		glGenBuffers(1, &VBO);						  // generate a Vertex Buffer Object to store vertex data
 		glGenBuffers(totalSubmeshCount, EBOs.data()); // generate an Element Buffer Object for each submesh to store index data
 
@@ -853,8 +853,7 @@ void Model::draw(glm::mat4 model, glm::mat4 view, glm::mat4 projection, glm::vec
 
 			if (alternativeTextureCount > 0 && textureCount == 1)
 				glBindTexture(GL_TEXTURE_2D, textures[selectedTexture]);
-
-			if (textureCount > 1)
+			else if (textureCount > 1)
 			{
 				if (submeshTextureIndex[i] == -1)
 				{

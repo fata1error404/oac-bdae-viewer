@@ -8,7 +8,7 @@
 
 class AABB
 {
-public:
+  public:
 	VEC3 MinEdge, MaxEdge;
 
 	// default constructor

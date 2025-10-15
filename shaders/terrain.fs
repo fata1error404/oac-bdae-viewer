@@ -24,6 +24,8 @@ uniform float specularStrength;
 
 out vec4 FragColor;
 
+// [TODO] find the optimal solution and annotate
+
 void main()
 {
 if (renderMode == 1)
@@ -33,28 +35,22 @@ if (renderMode == 1)
         vec4 color3 = texture(baseTextureArray, vec3(TexCoord1, TexIdx3));
         vec4 mask = texture(maskTexture, TexCoord2);
 
-        // clamp mask channels to safe range
         float mr = clamp(mask.r, 0.0, 1.0);
         float mg = clamp(mask.g, 0.0, 1.0);
         float mb = clamp(mask.b, 0.0, 1.0);
 
-        float w1 = TexBlendWeights.b * max(0.0, 1.0 - mr - mg); // base layer
-        float w2 = TexBlendWeights.r * mr;                     // red layer
-        float w3 = TexBlendWeights.g * mg;                     // green layer
+        float w1 = TexBlendWeights.b * max(0.0, 1.0 - mr - mg);
+        float w2 = TexBlendWeights.r * mr;
+        float w3 = TexBlendWeights.g * mg;
 
-        // normalize weights to avoid division by zero and preserve color energy
         float sumW = w1 + w2 + w3;
-        const float EPS = 1e-6;
+        float EPS = 1e-6;
         vec3 blended;
+
         if (sumW > EPS)
-        {
             blended = (color1.rgb * w1 + color2.rgb * w2 + color3.rgb * w3) / sumW;
-        }
         else
-        {
-            // fallback: use color1 if weights are effectively zero
             blended = color1.rgb;
-        }
 
         if (lighting)
         {
@@ -62,13 +58,11 @@ if (renderMode == 1)
             vec3 L = normalize(lightPos - PosWorldSpace);
             float diff = max(dot(N, L), 0.0);
 
-            vec3 ambient = 0.2 * lightColor;   // use your uniforms
+            vec3 ambient = 0.2 * lightColor;
             vec3 diffuse = 0.5 * lightColor * diff;
 
-            // shadow application: reduce brightness based on mask.b but do not zero-out
-            // shadowStrength in [0,1] controls how strong the shadow channel is
-            float shadowStrength = 1.0; // tweak: 1.0 = full effect, 0.5 = half
-            float shadow = mix(1.0, 1.0 - mb * shadowStrength, 1.0); // result in (0,1]
+            float shadowStrength = 1.0;
+            float shadow = mix(1.0, 1.0 - mb * shadowStrength, 1.0);
             vec3 lightingTerm = ambient + diffuse;
 
             blended = lightingTerm * shadow * blended;

@@ -35,7 +35,7 @@ inline std::unordered_map<std::string, std::shared_ptr<std::pair<std::vector<flo
 class Physics
 {
   public:
-	std::shared_ptr<std::pair<std::vector<float>, std::vector<unsigned short>>> mesh; // .phy mesh shared pointer to store pair vertices + indices vectors (this data will be share pointer with cache)
+	std::shared_ptr<std::pair<std::vector<float>, std::vector<unsigned short>>> mesh; // .phy mesh shared pointer to store pair vertices + indices vectors (this data will be sharing pointer with cache)
 
 	// values read from .phy file
 	int geometryType;

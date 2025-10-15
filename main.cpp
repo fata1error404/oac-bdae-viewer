@@ -14,7 +14,7 @@
 
 #include "shader.h"		// implementation of the graphics pipeline
 #include "camera.h"		// implementation of the camera system
-#include "sound.h"		// implementation of the sound system
+#include "sound.h"		// implementation of the sound playback
 #include "light.h"		// definition of the light settings and light cube
 #include "terrain.h"	// implementation of the terrain engine
 #include "parserBDAE.h" // parser for 3D models
@@ -278,9 +278,9 @@ int main()
 		{
 			ImGui::Spacing();
 			ImGui::TextWrapped("File:\xC2\xA0%s", terrainModel.fileName.c_str());
-			ImGui::Text("Size: %d Bytes", terrainModel.fileSize);
-			ImGui::Text("Vertices: %d", terrainModel.vertexCount);
-			ImGui::Text("Faces: %d", terrainModel.faceCount);
+			// ImGui::Text("Size: %d Bytes", terrainModel.fileSize);
+			// ImGui::Text("Vertices: %d", terrainModel.vertexCount);
+			// ImGui::Text("Faces: %d", terrainModel.faceCount);
 			ImGui::Text("3D Models: %d", terrainModel.modelCount);
 			ImGui::NewLine();
 			ImGui::Checkbox("Base Mesh (K)", &displayBaseMesh);

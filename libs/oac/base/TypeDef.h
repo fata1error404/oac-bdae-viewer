@@ -75,52 +75,6 @@ typedef int32 S32;
 typedef int16 S16;
 typedef int8 S8;
 typedef float F32;
-// #include <string>
-
-/* Define NULL pointer value */
-/*
-#ifndef NULL
-#ifdef __cplusplus
-#define NULL    0
-#else
-#define NULL    ((void *)0)
-#endif
-#endif
-*/
-
-#ifdef __GNUC__
-
-#define stricmp strcasecmp
-#define strnicmp strncasecmp
-#define I64FMT "%016llX"
-#define I64FMTD "%llu"
-#define SI64FMTD "%lld"
-
-#else
-
-#define I64FMT "%016I64X"
-#define I64FMTD "%I64u"
-#define SI64FMTD "%I64d"
-#define atoll _atoi64
-#define ltoa _ltoa
-#endif
-
-#ifdef __GNUC__
-#define LIKELY(_x) \
-	__builtin_expect((_x), 1)
-#define UNLIKELY(_x) \
-	__builtin_expect((_x), 0)
-#else
-#define LIKELY(_x) \
-	_x
-#define UNLIKELY(_x) \
-	_x
-#endif
-
-// #ifndef SOCKET
-// typedef uint32 SOCKET;
-// #define INVALID_SOCKET  (SOCKET)(~0)
-// #endif
 
 // ANSI C .h
 #include <stdlib.h>
@@ -147,56 +101,4 @@ typedef float F32;
 #include <set>
 using namespace std;
 
-/*
-#ifdef __GNUC__
-#include <ext/hash_map>
-#include <ext/hash_set>
-#else
-#include <hash_map>
-#include <hash_set>
 #endif
-
-#if COMPILER == COMPILER_MICROSOFT && _MSC_VER >= 1300
-#define HM_NAMESPACE stdext
-#else
-#define HM_NAMESPACE __gnu_cxx
-#endif
-*/
-
-// CPU endian
-#ifndef BIG_ENDIAN
-#define LITTLE_ENDIAN 1
-#endif
-
-#if !LITTLE_ENDIAN
-#define _BITSWAP16(x) (((x << 8) & 0xff00) | ((x >> 8) & 0x00ff))
-
-#define _BITSWAP32(x) (((x << 24) & 0xff000000) | ((x << 8) & 0x00ff0000) | \
-					   ((x >> 8) & 0x0000ff00) | ((x >> 24) & 0x000000ff))
-
-#define _BITSWAP64(x) (((x << 56) & 0xff00000000000000ULL) | ((x << 40) & 0x00ff000000000000ULL) | \
-					   ((x << 24) & 0x0000ff0000000000ULL) | ((x << 8) & 0x000000ff00000000ULL) |  \
-					   ((x >> 8) & 0x00000000ff000000ULL) | ((x >> 24) & 0x0000000000ff0000ULL) |  \
-					   ((x >> 40) & 0x000000000000ff00ULL) | ((x >> 56) & 0x00000000000000ffULL))
-#else
-#define _BITSWAP16(x) (x)
-#define _BITSWAP32(x) (x)
-#define _BITSWAP64(x) (x)
-#endif
-
-struct FTableHeader
-{
-	uint8 FLAG[8];
-	uint32 nVersion;
-	uint32 nRows;
-	uint32 nCols;
-	uint32 nOffsetIndex;
-	uint32 nOffsetFormat;
-	uint32 nOffsetEntry;
-	uint32 nEntrySize;
-	uint32 nOffsetStrTable;
-	uint32 nLengthStrTable;
-};
-#define TABLE_STR_FLAG "FTABLE"
-#define TABLE_VERSION 0x100000
-#endif // TYPE_COMMON_H_
