@@ -2,11 +2,11 @@
 
 layout (location = 0) in vec3 aPos;
 layout (location = 1) in vec3 aNormal;
-layout (location = 2) in vec2 aTexCoord1;
-layout (location = 3) in vec2 aTexCoord2;
-layout (location = 4) in vec3 aTexIdx;      // indices for 3 chunk textures into texture array
-layout (location = 5) in vec4 aColor;       // vertex color
-layout (location = 6) in vec3 aBary;        // barycentric coord (for wireframe mode optimization)
+layout (location = 2) in vec2 aTexCoord1;   // main textures coords
+layout (location = 3) in vec2 aTexCoord2;   // mask texture coords
+layout (location = 4) in vec3 aTexIdx;      // main textures indices into per tile texture array
+layout (location = 5) in vec4 aColor;       // main textures blending weights
+layout (location = 6) in vec3 aBary;        // barycentric coords (for wireframe mode optimization)
 
 uniform mat4 projection;
 uniform mat4 view;
@@ -34,6 +34,6 @@ void main()
     TexBlendWeights = aColor;
 
     vec4 clipPos = projection * view * model * vec4(aPos, 1.0);
-    Barycentric = aBary * clipPos.w;
+    Barycentric = aBary * clipPos.w; // scale for perspective-correct interpolation in fragment shader
     gl_Position = clipPos;
 }

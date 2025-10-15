@@ -9,4 +9,6 @@ little_endian_not_quantized.bdae
 
 SDatabaseCollada.h
 
+zip-data.sh
 zip-linux.sh
+zip-windows.sh

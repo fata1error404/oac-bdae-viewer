@@ -322,8 +322,8 @@ int Model::init(IReadResFile *file)
 			vertices.push_back(vertex[4]); // Ny
 			vertices.push_back(vertex[5]); // Nz
 
-			vertices.push_back(vertex[6]); // S
-			vertices.push_back(vertex[7]); // T
+			vertices.push_back(vertex[6]); // U
+			vertices.push_back(vertex[7]); // V
 		}
 
 		for (int k = 0; k < submeshCount[i]; k++)

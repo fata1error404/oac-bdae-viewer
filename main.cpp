@@ -278,9 +278,9 @@ int main()
 		{
 			ImGui::Spacing();
 			ImGui::TextWrapped("File:\xC2\xA0%s", terrainModel.fileName.c_str());
-			ImGui::Text("Size: %d Bytes", terrainModel.fileSize);
-			ImGui::Text("Vertices: %d", terrainModel.vertexCount);
-			ImGui::Text("Faces: %d", terrainModel.faceCount);
+			// ImGui::Text("Size: %d Bytes", terrainModel.fileSize);
+			// ImGui::Text("Vertices: %d", terrainModel.vertexCount);
+			// ImGui::Text("Faces: %d", terrainModel.faceCount);
 			ImGui::Text("3D Models: %d", terrainModel.modelCount);
 			ImGui::NewLine();
 			ImGui::Checkbox("Base Mesh (K)", &displayBaseMesh);

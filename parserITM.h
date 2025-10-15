@@ -58,7 +58,7 @@ class TileTerrain; // forward declaration
 
 inline void loadEntity(CZipResReader *physicsArchive, const char *fname, const EntityInfo &entityInfo, TileTerrain *tile, const VEC3 &tileOff, Terrain &terrain);
 
-//! Processes a single .itm file, retrieving for each tile's game object its resource file name, object type and world space info, and then calling the loader.
+//! Processes a single .itm file of a terrain tile, retrieving for each tile's game object its resource file name, object type and world space info, and then calling the loader.
 inline void loadTileEntities(CZipResReader *itemsArchive, CZipResReader *physicsArchive, int gridX, int gridZ, TileTerrain *tile, Terrain &terrain)
 {
 	// 1. load .itm file into memory
