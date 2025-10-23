@@ -24,12 +24,12 @@ class Light
 	bool showLighting;
 
 	Light()
-		: shader("shaders/lightcube.vs", "shaders/lightcube.fs"),
+		: shader("shaders/default.vs", "shaders/default.fs"),
 		  showLighting(false)
 	{
 		shader.use();
 		shader.setMat4("model", glm::translate(glm::mat4(1.0f), lightPos));
-		shader.setVec3("lightColor", lightColor);
+		shader.setVec3("Color", lightColor);
 
 		float vertices[] = {
 			-0.5f, -0.5f, -0.5f,

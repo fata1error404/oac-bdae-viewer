@@ -1,5 +1,7 @@
+.*
+test*
+
 app
-.vscode/
 data/
 tools/
 

@@ -1,6 +1,7 @@
 #include "parserBDAE.h"
 #include <algorithm>
 #include <filesystem>
+#include <cmath>
 #include "PackPatchReader.h"
 
 //! Parses .bdae file and sets up model mesh and texture data.
@@ -168,6 +169,7 @@ int Model::init(IReadResFile *file)
 
 	std::vector<std::string> meshName(meshCount);
 	meshTransform.assign(meshCount, glm::mat4(1.0f));
+	meshPivotOffset.assign(meshCount, glm::mat4(1.0f));
 
 	for (int i = 0; i < meshCount; i++)
 	{
@@ -231,70 +233,67 @@ int Model::init(IReadResFile *file)
 		totalSubmeshCount += submeshCount[i];
 	}
 
-	// 3.3 NODES (nodes are parsed to correctly position meshes within a model)
+	// 3.3 NODES (parse node hierarchy with proper root node and parent-child relationships)
 	// ____________________
 
-	if (nodeCollectionCount > 1)
-		LOG("[Warning] Model::init: > 1 node collections.");
+	parseNodeHierarchy();
+
+	// 3.4 MAP NODES TO MESHES (apply node transforms to meshes for correct positioning)
+	// ____________________
+
+	LOG("\n\033[37m[Init] Mapping nodes to meshes.\033[0m");
 
 	int node2meshCount = 0;
 
-	int nodeCount[nodeCollectionCount];
-	int nodeMetadataOffset[nodeCollectionCount];
-
-	for (int i = 0; i < nodeCollectionCount; i++)
+	for (size_t i = 0; i < nodes.size(); i++)
 	{
-#ifdef BETA_GAME_VERSION
-		memcpy(&nodeCount[i], DataBuffer + nodeCollectionInfoOffset + 8 + i * 16, sizeof(int));
-		memcpy(&nodeMetadataOffset[i], DataBuffer + nodeCollectionInfoOffset + 12 + i * 16, sizeof(int));
-#else
-		memcpy(&nodeCount[i], DataBuffer + header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 16 + i * 24, sizeof(int));
-		memcpy(&nodeMetadataOffset[i], DataBuffer + header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 20 + i * 24, sizeof(int));
-#endif
+		const Node &node = nodes[i];
 
-		if (i == 0)
-			LOG("\nNODES: ", nodeCount[i]);
+		// Try to find matching mesh by converting node name to mesh name
+		std::string nodeMeshName = node.id;
+		int pos = (int)nodeMeshName.find("-node");
+		if (pos != -1)
+			nodeMeshName.replace(pos, 5, "-mesh");
 
-		for (int k = 0; k < nodeCount[i]; k++)
+		// Find mesh with matching name
+		auto it = std::find(std::begin(meshName), std::end(meshName), nodeMeshName);
+
+		if (it != meshName.end())
 		{
-			BDAEint nameOffset;
-			int nameLength = 0;
-			int isVisible = 1; // [unused]
+			LOG("[", i + 1, "] node --> [", std::distance(meshName.begin(), it) + 1, "] mesh");
 
-#ifdef BETA_GAME_VERSION
-			memcpy(&nameOffset, DataBuffer + nodeMetadataOffset[i] + k * 80 + 4, sizeof(BDAEint));
-			memcpy(&isVisible, DataBuffer + nodeMetadataOffset[i] + k * 80 + 52, sizeof(int));
-			int nodeInfoOffset = nodeMetadataOffset[i] + k * 80;
-#else
-			memcpy(&nameOffset, DataBuffer + header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 20 + i * 24 + nodeMetadataOffset[i] + k * 96, sizeof(BDAEint));
-			memcpy(&isVisible, DataBuffer + header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 20 + i * 24 + nodeMetadataOffset[i] + k * 96 + 64, sizeof(int));
-			int nodeInfoOffset = header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 20 + i * 24 + nodeMetadataOffset[i] + k * 96;
-#endif
-			memcpy(&nameLength, DataBuffer + nameOffset - 4, sizeof(int));
-			std::string nodeMeshName(DataBuffer + nameOffset, nameLength);
+			int meshIdx = std::distance(meshName.begin(), it);
 
-			int pos = (int)nodeMeshName.find("-node");
-			if (pos != -1)
-				nodeMeshName.replace(pos, 5, "-mesh");
+			// Get PIVOT offset (child PIVOT transforms only, without node's own transform)
+			meshTransform[meshIdx] = glm::mat4(1.0f);
+			getPivotOffset(node.dataOffset, meshIdx, true);	   // skipFirst=true to skip node's own transform
+			meshPivotOffset[meshIdx] = meshTransform[meshIdx]; // Store pivot offset for animation updates
 
-			auto it = std::find(std::begin(meshName), std::end(meshName), nodeMeshName);
+			// Compute full mesh transform: node world transform * PIVOT offset
+			// node.worldTransform already contains: parent world * node local
+			// pivotOffset contains: PIVOT child transforms only
+			// Result: parent world * node local * PIVOT children
+			meshTransform[meshIdx] = node.worldTransform * meshPivotOffset[meshIdx];
 
-			if (it != meshName.end())
-			{
-				LOG("[", k + 1, "] node --> [", std::distance(meshName.begin(), it) + 1, "] mesh");
+			// Store mapping from node to mesh for rendering
+			nodeToMeshIndex[i] = meshIdx;
 
-				int meshIdx = std::distance(meshName.begin(), it);
-				getNodeTransformation(nodeInfoOffset, meshIdx);
+			node2meshCount++;
 
-				node2meshCount++;
-
-				// stop early if every mesh already has exactly one node assigned ([TODO] questionable approach)
-				if (nodeCollectionCount == 1 && node2meshCount == meshCount)
-					break;
-			}
-			else
-				LOG("[Warning] Model::init: mesh name ", nodeMeshName, " for node [", k + 1, "] not found!");
+			// stop early if every mesh already has exactly one node assigned ([TODO] questionable approach)
+			if (nodeCollectionCount == 1 && node2meshCount == meshCount)
+				break;
 		}
+		else
+			LOG("[Warning] Model::init: mesh name ", nodeMeshName, " for node [", i + 1, "] not found!");
+	}
+
+	// Debug: print mesh transforms
+	LOG("\n\033[37m[Debug] Mesh transforms:\033[0m");
+	for (int i = 0; i < meshCount; i++)
+	{
+		glm::vec3 pos = glm::vec3(meshTransform[i][3]);
+		LOG("[", i + 1, "] ", meshName[i], " pos=(", pos.x, ", ", pos.y, ", ", pos.z, ")");
 	}
 
 	// 4. parse model data section: build vertex and index data for each mesh; all vertex data is stored in a single flat vector, while index data is stored in separate vectors for each submesh
@@ -353,6 +352,65 @@ int Model::init(IReadResFile *file)
 	return 0;
 }
 
+//! Get only the PIVOT child transforms (without the node's own local transform).
+void Model::getPivotOffset(int nodeInfoOffset, int nodeMeshIdx, bool skipFirst)
+{
+	int childrenOffset = 0;
+	float transX, transY, transZ;
+	float rotX, rotY, rotZ, rotW;
+	float scaleX, scaleY, scaleZ;
+
+#ifdef BETA_GAME_VERSION
+	memcpy(&transX, DataBuffer + nodeInfoOffset + 12, sizeof(float));
+	memcpy(&transY, DataBuffer + nodeInfoOffset + 16, sizeof(float));
+	memcpy(&transZ, DataBuffer + nodeInfoOffset + 20, sizeof(float));
+	memcpy(&rotX, DataBuffer + nodeInfoOffset + 24, sizeof(float));
+	memcpy(&rotY, DataBuffer + nodeInfoOffset + 28, sizeof(float));
+	memcpy(&rotZ, DataBuffer + nodeInfoOffset + 32, sizeof(float));
+	memcpy(&rotW, DataBuffer + nodeInfoOffset + 36, sizeof(float));
+	memcpy(&scaleX, DataBuffer + nodeInfoOffset + 40, sizeof(float));
+	memcpy(&scaleY, DataBuffer + nodeInfoOffset + 44, sizeof(float));
+	memcpy(&scaleZ, DataBuffer + nodeInfoOffset + 48, sizeof(float));
+	memcpy(&childrenOffset, DataBuffer + nodeInfoOffset + 60, sizeof(int));
+#else
+	memcpy(&transX, DataBuffer + nodeInfoOffset + 24, sizeof(float));
+	memcpy(&transY, DataBuffer + nodeInfoOffset + 28, sizeof(float));
+	memcpy(&transZ, DataBuffer + nodeInfoOffset + 32, sizeof(float));
+	memcpy(&rotX, DataBuffer + nodeInfoOffset + 36, sizeof(float));
+	memcpy(&rotY, DataBuffer + nodeInfoOffset + 40, sizeof(float));
+	memcpy(&rotZ, DataBuffer + nodeInfoOffset + 44, sizeof(float));
+	memcpy(&rotW, DataBuffer + nodeInfoOffset + 48, sizeof(float));
+	memcpy(&scaleX, DataBuffer + nodeInfoOffset + 52, sizeof(float));
+	memcpy(&scaleY, DataBuffer + nodeInfoOffset + 56, sizeof(float));
+	memcpy(&scaleZ, DataBuffer + nodeInfoOffset + 60, sizeof(float));
+	memcpy(&childrenOffset, DataBuffer + nodeInfoOffset + 72, sizeof(int));
+
+	if (childrenOffset != 0)
+		childrenOffset += nodeInfoOffset + 72;
+
+	// [TODO] yeah you see it
+	if (fileName == "pvp_flag03.bdae" || fileName == "pvp_flag04.bdae")
+		transY = 3.0f;
+#endif
+
+	// Only apply transform if not skipping first (i.e., for PIVOT children only)
+	if (!skipFirst)
+	{
+		// translate -> rotate -> scale
+		glm::mat4 nodeLocalTransform(1.0f);
+		nodeLocalTransform = glm::translate(glm::mat4(1.0f), glm::vec3(transX, transY, transZ));
+		nodeLocalTransform *= glm::mat4_cast(glm::quat(-rotW, rotX, rotY, rotZ));
+		nodeLocalTransform *= glm::scale(glm::mat4(1.0f), glm::vec3(scaleX, scaleY, scaleZ));
+
+		// combine with parent node transformation matrix
+		meshTransform[nodeMeshIdx] *= nodeLocalTransform;
+	}
+
+	// if has child node, recursive call (don't skip children)
+	if (childrenOffset != 0)
+		getPivotOffset(childrenOffset, nodeMeshIdx, false);
+}
+
 //! Recursively parses child nodes to accumulate local transformation matrix for a single mesh (called in init).
 void Model::getNodeTransformation(int nodeInfoOffset, int nodeMeshIdx)
 {
@@ -406,6 +464,404 @@ void Model::getNodeTransformation(int nodeInfoOffset, int nodeMeshIdx)
 	// if has child node, recursive call
 	if (childrenOffset != 0)
 		getNodeTransformation(childrenOffset, nodeMeshIdx);
+}
+
+//! Parse node hierarchy with proper root node and parent-child relationships.
+void Model::parseNodeHierarchy()
+{
+	LOG("\n\033[37m[Init] Parsing node hierarchy.\033[0m");
+
+	// Find node collection info
+	BDAEFileHeader *header = (BDAEFileHeader *)DataBuffer;
+	char *ptr = DataBuffer + header->offsetData + 96;
+
+	int nodeCollectionInfoOffset;
+	memcpy(&nodeCollectionCount, ptr + 72, sizeof(int));
+	memcpy(&nodeCollectionInfoOffset, ptr + 76, sizeof(int));
+
+	if (nodeCollectionCount == 0 || nodeCollectionInfoOffset == 0)
+	{
+		LOG("[Warning] No node collections found.");
+		return;
+	}
+
+	LOG("Node collections: ", nodeCollectionCount);
+
+	// Parse each node collection
+	for (int i = 0; i < nodeCollectionCount; i++)
+	{
+		int nodeCount, nodeMetadataOffset;
+
+#ifdef BETA_GAME_VERSION
+		memcpy(&nodeCount, DataBuffer + nodeCollectionInfoOffset + 8 + i * 16, sizeof(int));
+		memcpy(&nodeMetadataOffset, DataBuffer + nodeCollectionInfoOffset + 12 + i * 16, sizeof(int));
+#else
+		memcpy(&nodeCount, DataBuffer + header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 16 + i * 24, sizeof(int));
+		memcpy(&nodeMetadataOffset, DataBuffer + header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 20 + i * 24, sizeof(int));
+
+		if (nodeMetadataOffset != 0)
+			nodeMetadataOffset += header->offsetData + 168 + 4 + nodeCollectionInfoOffset + 20 + i * 24;
+#endif
+
+		LOG("Collection [", i, "]: ", nodeCount, " nodes");
+
+		if (nodeMetadataOffset == 0)
+			continue;
+
+		// Parse each root node in this collection
+		int nodeSize = 80;
+#ifndef BETA_GAME_VERSION
+		nodeSize = 96;
+#endif
+
+		for (int k = 0; k < nodeCount; k++)
+		{
+			int nodeOffset = nodeMetadataOffset + k * nodeSize;
+			parseNodeRecursive(nodeOffset, -1); // -1 = root node (no parent)
+		}
+	}
+
+	LOG("Total nodes parsed: ", nodes.size());
+
+	// Update world transforms
+	updateNodeTransforms();
+
+	// Save original transforms for animation reset
+	for (Node &node : nodes)
+	{
+		node.originalPosition = node.localPosition;
+		node.originalRotation = node.localRotation;
+		node.originalScale = node.localScale;
+	}
+}
+
+//! Recursively parse a node and its children.
+void Model::parseNodeRecursive(int nodeOffset, int parentIndex)
+{
+	// Read node name
+	BDAEint nameOffset;
+	int nameLength = 0;
+
+#ifdef BETA_GAME_VERSION
+	memcpy(&nameOffset, DataBuffer + nodeOffset + 4, sizeof(BDAEint));
+#else
+	memcpy(&nameOffset, DataBuffer + nodeOffset, sizeof(BDAEint));
+#endif
+
+	if (nameOffset <= 4 || nameOffset >= fileSize)
+		return;
+
+	memcpy(&nameLength, DataBuffer + nameOffset - 4, sizeof(int));
+	if (nameLength <= 0 || nameLength > 200)
+		return;
+
+	std::string nodeId(DataBuffer + nameOffset, nameLength);
+	std::string nodeName = nodeId;
+
+	// Remove "-node" suffix if present
+	size_t pos = nodeName.find("-node");
+	if (pos != std::string::npos)
+		nodeName = nodeName.substr(0, pos);
+
+	// Read transform data
+	float transX, transY, transZ;
+	float rotX, rotY, rotZ, rotW;
+	float scaleX, scaleY, scaleZ;
+	int childrenCount, childrenOffset;
+
+#ifdef BETA_GAME_VERSION
+	memcpy(&transX, DataBuffer + nodeOffset + 12, sizeof(float));
+	memcpy(&transY, DataBuffer + nodeOffset + 16, sizeof(float));
+	memcpy(&transZ, DataBuffer + nodeOffset + 20, sizeof(float));
+	memcpy(&rotX, DataBuffer + nodeOffset + 24, sizeof(float));
+	memcpy(&rotY, DataBuffer + nodeOffset + 28, sizeof(float));
+	memcpy(&rotZ, DataBuffer + nodeOffset + 32, sizeof(float));
+	memcpy(&rotW, DataBuffer + nodeOffset + 36, sizeof(float));
+	memcpy(&scaleX, DataBuffer + nodeOffset + 40, sizeof(float));
+	memcpy(&scaleY, DataBuffer + nodeOffset + 44, sizeof(float));
+	memcpy(&scaleZ, DataBuffer + nodeOffset + 48, sizeof(float));
+	memcpy(&childrenCount, DataBuffer + nodeOffset + 56, sizeof(int));
+	memcpy(&childrenOffset, DataBuffer + nodeOffset + 60, sizeof(int));
+
+	if (childrenOffset != 0)
+		childrenOffset += nodeOffset + 60;
+#else
+	memcpy(&transX, DataBuffer + nodeOffset + 24, sizeof(float));
+	memcpy(&transY, DataBuffer + nodeOffset + 28, sizeof(float));
+	memcpy(&transZ, DataBuffer + nodeOffset + 32, sizeof(float));
+	memcpy(&rotX, DataBuffer + nodeOffset + 36, sizeof(float));
+	memcpy(&rotY, DataBuffer + nodeOffset + 40, sizeof(float));
+	memcpy(&rotZ, DataBuffer + nodeOffset + 44, sizeof(float));
+	memcpy(&rotW, DataBuffer + nodeOffset + 48, sizeof(float));
+	memcpy(&scaleX, DataBuffer + nodeOffset + 52, sizeof(float));
+	memcpy(&scaleY, DataBuffer + nodeOffset + 56, sizeof(float));
+	memcpy(&scaleZ, DataBuffer + nodeOffset + 60, sizeof(float));
+	memcpy(&childrenCount, DataBuffer + nodeOffset + 68, sizeof(int));
+	memcpy(&childrenOffset, DataBuffer + nodeOffset + 72, sizeof(int));
+
+	if (childrenOffset != 0)
+		childrenOffset += nodeOffset + 72;
+#endif
+
+	// Create node
+	Node node;
+	node.id = nodeId;
+	node.name = nodeName;
+	node.parentIndex = parentIndex;
+	node.dataOffset = nodeOffset;
+	node.localPosition = glm::vec3(transX, transY, transZ);
+	node.localRotation = glm::quat(-rotW, rotX, rotY, rotZ);
+	node.localScale = glm::vec3(scaleX, scaleY, scaleZ);
+
+	// Add to list
+	int nodeIndex = (int)nodes.size();
+	nodes.push_back(node);
+	nodeNameToIndex[nodeId] = nodeIndex;
+	nodeNameToIndex[nodeName] = nodeIndex;
+
+	// Update parent's children list
+	if (parentIndex >= 0 && parentIndex < (int)nodes.size())
+		nodes[parentIndex].childIndices.push_back(nodeIndex);
+
+	// Parse children recursively
+	if (childrenCount > 0 && childrenOffset > 0)
+	{
+		int nodeSize = 80;
+#ifndef BETA_GAME_VERSION
+		nodeSize = 96;
+#endif
+
+		for (int i = 0; i < childrenCount; i++)
+		{
+			int childOffset = childrenOffset + i * nodeSize;
+			parseNodeRecursive(childOffset, nodeIndex);
+		}
+	}
+}
+
+//! Update world transforms for all nodes (traverse from root).
+void Model::updateNodeTransforms()
+{
+	// Find root nodes and update their transforms recursively
+	for (size_t i = 0; i < nodes.size(); i++)
+	{
+		if (nodes[i].parentIndex == -1)
+		{
+			// Root node: world transform = local transform
+			glm::mat4 localTransform(1.0f);
+			localTransform = glm::translate(glm::mat4(1.0f), nodes[i].localPosition);
+			localTransform *= glm::mat4_cast(nodes[i].localRotation);
+			localTransform *= glm::scale(glm::mat4(1.0f), nodes[i].localScale);
+			nodes[i].worldTransform = localTransform;
+
+			// Update children recursively
+			updateNodeTransformsRecursive(i);
+		}
+	}
+}
+
+//! Helper function to recursively update child node transforms.
+void Model::updateNodeTransformsRecursive(int nodeIndex)
+{
+	const Node &node = nodes[nodeIndex];
+
+	for (int childIdx : node.childIndices)
+	{
+		// Calculate local transform
+		glm::mat4 localTransform(1.0f);
+		localTransform = glm::translate(glm::mat4(1.0f), nodes[childIdx].localPosition);
+		localTransform *= glm::mat4_cast(nodes[childIdx].localRotation);
+		localTransform *= glm::scale(glm::mat4(1.0f), nodes[childIdx].localScale);
+
+		// World transform = parent's world transform * local transform
+		nodes[childIdx].worldTransform = node.worldTransform * localTransform;
+
+		// Recursively update this child's children
+		updateNodeTransformsRecursive(childIdx);
+	}
+}
+
+//! Update mesh transforms from animated node transforms.
+void Model::updateMeshTransformsFromNodes()
+{
+	// For each node that has a mesh, update the mesh transform
+	for (const auto &pair : nodeToMeshIndex)
+	{
+		int nodeIdx = pair.first;
+		int meshIdx = pair.second;
+
+		if (nodeIdx >= 0 && nodeIdx < (int)nodes.size() &&
+			meshIdx >= 0 && meshIdx < (int)meshTransform.size())
+		{
+			// Update mesh transform: animated node world transform * pivot offset
+			meshTransform[meshIdx] = nodes[nodeIdx].worldTransform * meshPivotOffset[meshIdx];
+		}
+	}
+}
+
+//! Print node hierarchy for debugging.
+void Model::printNodeHierarchy(int nodeIndex, int depth)
+{
+	if (nodeIndex < 0 || nodeIndex >= (int)nodes.size())
+		return;
+
+	const Node &node = nodes[nodeIndex];
+
+	// Print indentation
+	for (int i = 0; i < depth; i++)
+	{
+		if (i == depth - 1)
+			std::cout << "├─ ";
+		else
+			std::cout << "│  ";
+	}
+
+	// Print node info
+	glm::vec3 pos = node.localPosition;
+	std::cout << node.name << " [" << nodeIndex << "] pos=("
+			  << pos.x << ", " << pos.y << ", " << pos.z << ") children="
+			  << node.childIndices.size() << "\n";
+
+	// Print children
+	for (int childIdx : node.childIndices)
+		printNodeHierarchy(childIdx, depth + 1);
+}
+
+//! Generate unit sphere geometry for node visualization.
+void Model::generateUnitSphere()
+{
+	std::vector<float> vertices;
+	std::vector<unsigned int> indices;
+
+	// Generate icosphere (subdivided icosahedron)
+	const float t = (1.0f + std::sqrt(5.0f)) / 2.0f;
+
+	// 12 vertices of icosahedron
+	std::vector<glm::vec3> positions = {
+		glm::normalize(glm::vec3(-1, t, 0)),
+		glm::normalize(glm::vec3(1, t, 0)),
+		glm::normalize(glm::vec3(-1, -t, 0)),
+		glm::normalize(glm::vec3(1, -t, 0)),
+		glm::normalize(glm::vec3(0, -1, t)),
+		glm::normalize(glm::vec3(0, 1, t)),
+		glm::normalize(glm::vec3(0, -1, -t)),
+		glm::normalize(glm::vec3(0, 1, -t)),
+		glm::normalize(glm::vec3(t, 0, -1)),
+		glm::normalize(glm::vec3(t, 0, 1)),
+		glm::normalize(glm::vec3(-t, 0, -1)),
+		glm::normalize(glm::vec3(-t, 0, 1))};
+
+	// 20 faces of icosahedron
+	std::vector<unsigned int> faces = {
+		0, 11, 5, 0, 5, 1, 0, 1, 7, 0, 7, 10, 0, 10, 11,
+		1, 5, 9, 5, 11, 4, 11, 10, 2, 10, 7, 6, 7, 1, 8,
+		3, 9, 4, 3, 4, 2, 3, 2, 6, 3, 6, 8, 3, 8, 9,
+		4, 9, 5, 2, 4, 11, 6, 2, 10, 8, 6, 7, 9, 8, 1};
+
+	// Build vertex data (position + normal)
+	for (const auto &pos : positions)
+	{
+		vertices.push_back(pos.x);
+		vertices.push_back(pos.y);
+		vertices.push_back(pos.z);
+		// Normal = position for unit sphere
+		vertices.push_back(pos.x);
+		vertices.push_back(pos.y);
+		vertices.push_back(pos.z);
+	}
+
+	indices = faces;
+
+	nodeSphereVertexCount = (int)positions.size();
+	nodeSphereIndexCount = (int)indices.size();
+
+	// Create OpenGL buffers
+	glGenVertexArrays(1, &nodeVAO);
+	glGenBuffers(1, &nodeVBO);
+	glGenBuffers(1, &nodeEBO);
+
+	glBindVertexArray(nodeVAO);
+
+	glBindBuffer(GL_ARRAY_BUFFER, nodeVBO);
+	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_STATIC_DRAW);
+
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, nodeEBO);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), indices.data(), GL_STATIC_DRAW);
+
+	// Position attribute
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void *)0);
+	glEnableVertexAttribArray(0);
+
+	// Normal attribute
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void *)(3 * sizeof(float)));
+	glEnableVertexAttribArray(1);
+
+	glBindVertexArray(0);
+
+	LOG("[Init] Generated unit sphere: ", nodeSphereVertexCount, " vertices, ", nodeSphereIndexCount / 3, " triangles");
+}
+
+//! Render nodes as small spheres.
+void Model::drawNodes(glm::mat4 baseModel, glm::mat4 view, glm::mat4 projection)
+{
+	// Task 1: Only render nodes when NOT in simple mode (displayBaseMesh = true)
+	if (nodes.empty() || nodeVAO == 0)
+		return;
+
+	// Apply the same transformations as the mesh (for viewer rotation/positioning)
+	if (meshCenter != glm::vec3(-1.0f))
+	{
+		baseModel = glm::mat4(1.0f);
+		baseModel = glm::translate(baseModel, meshCenter);
+		baseModel = glm::rotate(baseModel, glm::radians(meshPitch), glm::vec3(1, 0, 0));
+		baseModel = glm::rotate(baseModel, glm::radians(meshYaw), glm::vec3(0, 1, 0));
+		baseModel = glm::translate(baseModel, -meshCenter);
+	}
+
+	nodeShader.use();
+	nodeShader.setMat4("projection", projection);
+	nodeShader.setMat4("view", view);
+
+	glBindVertexArray(nodeVAO);
+
+	const float FIXED_SPHERE_SIZE = 0.05f;
+
+	// Render each node
+	for (size_t i = 0; i < nodes.size(); i++)
+	{
+		const Node &node = nodes[i];
+
+		// Get node transform (mesh transform if available, otherwise world transform)
+		glm::mat4 nodeTransform = node.worldTransform;
+		auto meshIt = nodeToMeshIndex.find(i);
+		if (meshIt != nodeToMeshIndex.end())
+			nodeTransform = meshTransform[meshIt->second];
+
+		// Apply baseModel transformation first, then extract position
+		// This matches how meshes are rendered: model * meshTransform
+		glm::mat4 fullTransform = baseModel * nodeTransform;
+		glm::vec3 nodePosition = glm::vec3(fullTransform[3]);
+
+		// Build node model matrix
+		glm::mat4 nodeModel = glm::translate(glm::mat4(1.0f), nodePosition);
+		nodeModel = glm::scale(nodeModel, glm::vec3(FIXED_SPHERE_SIZE));
+
+		// Set color based on node type
+		glm::vec3 color;
+		if (node.parentIndex == -1)
+			color = glm::vec3(1.0f, 0.0f, 0.0f); // Red for root nodes
+		else if (node.childIndices.empty())
+			color = glm::vec3(0.0f, 0.5f, 1.0f); // Blue for leaf nodes
+		else
+			color = glm::vec3(0.0f, 1.0f, 0.0f); // Green for joint nodes
+
+		nodeShader.setMat4("model", nodeModel);
+		nodeShader.setVec3("Color", color);
+
+		glDrawElements(GL_TRIANGLES, nodeSphereIndexCount, GL_UNSIGNED_INT, 0);
+	}
+
+	glBindVertexArray(0);
 }
 
 //! Loads .bdae file from disk, calls the parser and searches for alternative textures and sounds.
@@ -772,8 +1228,37 @@ void Model::load(const char *fpath, Sound &sound, bool isTerrainViewer)
 		stbi_image_free(data);
 	}
 
+	// Generate unit sphere for node visualization
+	generateUnitSphere();
+
 	modelLoaded = true;
 	LOG("\033[1m\033[38;2;200;200;200m[Load] BDAE model loaded.\033[0m\n");
+
+	// Automatically try to load animation file
+	// Pattern: if model is "dragon_model.bdae", try "dragon_animation_idle.bdae"
+	if (!isTerrainViewer)
+	{
+		std::string animationPath = std::string(fpath);
+
+		// Check if filename ends with "_model.bdae"
+		size_t modelPos = animationPath.rfind(".bdae");
+		if (modelPos != std::string::npos)
+		{
+			// Replace "_model.bdae" with "_animation_idle.bdae"
+			animationPath.replace(modelPos, 11, "_anim.bdae");
+
+			// Check if animation file exists
+			if (std::filesystem::exists(animationPath))
+			{
+				LOG("\n\033[37m[Load] Found animation file: ", animationPath, "\033[0m");
+				loadAnimations(animationPath.c_str());
+			}
+			else
+			{
+				LOG("\n\033[37m[Load] No animation file found at: ", animationPath, "\033[0m");
+			}
+		}
+	}
 }
 
 //! Clears GPU memory and resets viewer state.
@@ -792,6 +1277,15 @@ void Model::reset()
 		EBOs.clear();
 	}
 
+	// Clean up node visualization buffers
+	if (nodeVAO != 0)
+	{
+		glDeleteVertexArrays(1, &nodeVAO);
+		glDeleteBuffers(1, &nodeVBO);
+		glDeleteBuffers(1, &nodeEBO);
+		nodeVAO = nodeVBO = nodeEBO = 0;
+	}
+
 	if (!textures.empty())
 	{
 		glDeleteTextures(textures.size(), textures.data());
@@ -805,8 +1299,12 @@ void Model::reset()
 	sounds.clear();
 	meshTransform.clear();
 	submeshToMesh.clear();
+	nodes.clear();
+	nodeNameToIndex.clear();
+	nodeToMeshIndex.clear();
 
 	fileSize = vertexCount = faceCount = textureCount = alternativeTextureCount = selectedTexture = totalSubmeshCount = 0;
+	nodeSphereVertexCount = nodeSphereIndexCount = 0;
 }
 
 //! Renders .bdae model.
@@ -897,7 +1395,639 @@ void Model::draw(glm::mat4 model, glm::mat4 view, glm::mat4 projection, glm::vec
 			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBOs[i]);
 			glDrawElements(GL_TRIANGLES, indices[i].size(), GL_UNSIGNED_SHORT, 0);
 		}
+
+		// render node visualization (bones/skeleton)
+		drawNodes(glm::mat4(1.0f), view, projection);
 	}
 
 	glBindVertexArray(0);
+}
+// Animation functions to be added to parserBDAE.cpp
+
+//! Load animations from a separate .bdae animation file.
+void Model::loadAnimations(const char *animationFilePath)
+{
+	LOG("\n\033[1m\033[97mLoading animations from ", animationFilePath, "\033[0m");
+
+	// Open animation file
+	CPackPatchReader *animArchive = new CPackPatchReader(animationFilePath, true, false);
+	if (!animArchive)
+	{
+		LOG("[Error] Failed to open animation archive");
+		return;
+	}
+
+	IReadResFile *animFile = animArchive->openFile("little_endian_not_quantized.bdae");
+	if (!animFile)
+	{
+		LOG("[Error] Failed to open animation file inside archive");
+		delete animArchive;
+		return;
+	}
+
+	// Read header
+	BDAEFileHeader header;
+	animFile->read(&header, sizeof(header));
+
+	// Read entire file into buffer
+	int animFileSize = animFile->getSize();
+	char *animBuffer = (char *)malloc(animFileSize);
+	animFile->seek(0);
+	animFile->read(animBuffer, animFileSize);
+
+	// Helper function to read string at offset
+	auto readString = [&](uint32_t offset) -> std::string
+	{
+		if (offset < 4 || offset >= animFileSize)
+			return "";
+		int length;
+		memcpy(&length, animBuffer + offset - 4, sizeof(int));
+		if (length <= 0 || length > 200)
+			return "";
+		return std::string(animBuffer + offset, length);
+	};
+
+	// Helper function to parse source data
+	auto parseSourceData = [&](BDAEint sourceOffset, DataType dataType, int elementCount) -> std::vector<float>
+	{
+		std::vector<float> result;
+		if (sourceOffset >= animFileSize)
+			return result;
+
+		for (int i = 0; i < elementCount; i++)
+		{
+			float value = 0.0f;
+			switch (dataType)
+			{
+			case DataType::BYTE:
+			{
+				int8_t val;
+				memcpy(&val, animBuffer + sourceOffset + i * 1, 1);
+				value = (float)val;
+				break;
+			}
+			case DataType::UBYTE:
+			{
+				uint8_t val;
+				memcpy(&val, animBuffer + sourceOffset + i * 1, 1);
+				value = (float)val;
+				break;
+			}
+			case DataType::SHORT:
+			{
+				int16_t val;
+				memcpy(&val, animBuffer + sourceOffset + i * 2, 2);
+				value = (float)val;
+				break;
+			}
+			case DataType::USHORT:
+			{
+				uint16_t val;
+				memcpy(&val, animBuffer + sourceOffset + i * 2, 2);
+				value = (float)val;
+				break;
+			}
+			case DataType::INT:
+			{
+				int32_t val;
+				memcpy(&val, animBuffer + sourceOffset + i * 4, 4);
+				value = (float)val;
+				break;
+			}
+			case DataType::UINT:
+			{
+				uint32_t val;
+				memcpy(&val, animBuffer + sourceOffset + i * 4, 4);
+				value = (float)val;
+				break;
+			}
+			case DataType::FLOAT:
+			{
+				memcpy(&value, animBuffer + sourceOffset + i * 4, 4);
+				break;
+			}
+			}
+			result.push_back(value);
+		}
+		return result;
+	};
+
+	// Find SLibraryAnimations (at offsetData + 56)
+	BDAEint libAnimOffset = header.offsetData + 56;
+	uint32_t animCount, animOffsetRel;
+	memcpy(&animCount, animBuffer + libAnimOffset, sizeof(uint32_t));
+	memcpy(&animOffsetRel, animBuffer + libAnimOffset + 4, sizeof(uint32_t));
+
+	BDAEint animArrayOffset = libAnimOffset + 4 + animOffsetRel;
+
+	LOG("Animation count: ", animCount);
+
+	// Find SAnimationData (sources array) - search for size field = animCount * 2
+	BDAEint sourcesOffset = 0;
+	uint32_t expectedSourcesCount = animCount * 2;
+
+	for (BDAEint pos = header.offsetData; pos < animFileSize - 8; pos++)
+	{
+		uint32_t count;
+		memcpy(&count, animBuffer + pos, sizeof(uint32_t));
+		if (count == expectedSourcesCount)
+		{
+			sourcesOffset = pos;
+			break;
+		}
+	}
+
+	if (sourcesOffset == 0)
+	{
+		LOG("[Warning] Could not find SAnimationData structure");
+		free(animBuffer);
+		delete animFile;
+		delete animArchive;
+		return;
+	}
+
+	LOG("Found SAnimationData at offset: 0x", std::hex, sourcesOffset, std::dec);
+
+	// Parse sources array
+	uint32_t sourcesCount;
+	memcpy(&sourcesCount, animBuffer + sourcesOffset, sizeof(uint32_t));
+	BDAEint sourcesArrayOffset = sourcesOffset + 4;
+
+	LOG("Sources count: ", sourcesCount);
+
+	// Read source descriptors
+	struct SourceDesc
+	{
+		uint32_t count;
+		BDAEint dataOffset;
+	};
+
+	std::vector<SourceDesc> sourceDescs;
+	for (uint32_t i = 0; i < sourcesCount; i++)
+	{
+		BDAEint descPos = sourcesArrayOffset + i * 8;
+		SourceDesc desc;
+		uint32_t offsetRel;
+		memcpy(&desc.count, animBuffer + descPos, sizeof(uint32_t));
+		memcpy(&offsetRel, animBuffer + descPos + 4, sizeof(uint32_t));
+		desc.dataOffset = descPos + 4 + offsetRel;
+		sourceDescs.push_back(desc);
+	}
+
+	// Parse each animation
+	const int ANIM_STRUCT_SIZE = 40;
+
+	for (uint32_t animIdx = 0; animIdx < animCount; animIdx++)
+	{
+		BDAEint animPos = animArrayOffset + animIdx * ANIM_STRUCT_SIZE;
+
+		// Read SAnimation structure
+		uint32_t idOffset, idPadding;
+		uint32_t samplersCount, samplersOffsetRel;
+		uint32_t channelsCount, channelsOffsetRel;
+
+		memcpy(&idOffset, animBuffer + animPos, sizeof(uint32_t));
+		memcpy(&idPadding, animBuffer + animPos + 4, sizeof(uint32_t));
+
+		BDAEint samplersBase = animPos + 8;
+		memcpy(&samplersCount, animBuffer + samplersBase, sizeof(uint32_t));
+		memcpy(&samplersOffsetRel, animBuffer + samplersBase + 4, sizeof(uint32_t));
+		BDAEint samplersOffset = samplersBase + 4 + samplersOffsetRel;
+
+		BDAEint channelsBase = animPos + 16;
+		memcpy(&channelsCount, animBuffer + channelsBase, sizeof(uint32_t));
+		memcpy(&channelsOffsetRel, animBuffer + channelsBase + 4, sizeof(uint32_t));
+		BDAEint channelsOffset = channelsBase + 4 + channelsOffsetRel;
+
+		std::string animName = readString(idOffset);
+
+		Animation anim;
+		anim.name = animName;
+		anim.duration = 0.0f;
+
+		LOG("\n[", animIdx, "] ", animName);
+		LOG("  Samplers: ", samplersCount);
+		LOG("  Channels: ", channelsCount);
+
+		// Parse samplers
+		for (uint32_t s = 0; s < samplersCount; s++)
+		{
+			BDAEint samplerPos = samplersOffset + s * 28;
+
+			AnimationSampler sampler;
+			int32_t interp, inType, inComp, inSrc, outType, outComp, outSrc;
+
+			memcpy(&interp, animBuffer + samplerPos, sizeof(int32_t));
+			memcpy(&inType, animBuffer + samplerPos + 4, sizeof(int32_t));
+			memcpy(&inComp, animBuffer + samplerPos + 8, sizeof(int32_t));
+			memcpy(&inSrc, animBuffer + samplerPos + 12, sizeof(int32_t));
+			memcpy(&outType, animBuffer + samplerPos + 16, sizeof(int32_t));
+			memcpy(&outComp, animBuffer + samplerPos + 20, sizeof(int32_t));
+			memcpy(&outSrc, animBuffer + samplerPos + 24, sizeof(int32_t));
+
+			sampler.interpolation = (InterpolationType)interp;
+			sampler.inputSourceIndex = inSrc;
+			sampler.outputSourceIndex = outSrc;
+			sampler.inputType = (DataType)inType;
+			sampler.inputComponentCount = inComp;
+			sampler.outputType = (DataType)outType;
+			sampler.outputComponentCount = outComp;
+
+			// Parse keyframe source data if not already parsed
+			if (inSrc >= 0 && inSrc < (int)sourcesCount)
+			{
+				// Ensure keyframeSources has enough space
+				while ((int)keyframeSources.size() <= inSrc)
+				{
+					keyframeSources.push_back(KeyframeSource());
+				}
+
+				// Parse if not already parsed
+				if (keyframeSources[inSrc].data.empty())
+				{
+					keyframeSources[inSrc].dataType = (DataType)inType;
+					keyframeSources[inSrc].componentCount = inComp;
+					keyframeSources[inSrc].data = parseSourceData(sourceDescs[inSrc].dataOffset, (DataType)inType, sourceDescs[inSrc].count);
+
+					// Convert time values from frames to seconds (BDAE uses 30 fps)
+					// Time values in BDAE are stored as frame numbers, need to divide by 30
+					const float BDAE_FPS = 30.0f;
+					for (float &timeValue : keyframeSources[inSrc].data)
+					{
+						timeValue /= BDAE_FPS;
+					}
+
+					// Update animation duration from time values
+					if (!keyframeSources[inSrc].data.empty())
+					{
+						float maxTime = *std::max_element(keyframeSources[inSrc].data.begin(), keyframeSources[inSrc].data.end());
+						if (maxTime > anim.duration)
+							anim.duration = maxTime;
+					}
+				}
+			}
+
+			if (outSrc >= 0 && outSrc < (int)sourcesCount)
+			{
+				while ((int)keyframeSources.size() <= outSrc)
+				{
+					keyframeSources.push_back(KeyframeSource());
+				}
+
+				if (keyframeSources[outSrc].data.empty())
+				{
+					keyframeSources[outSrc].dataType = (DataType)outType;
+					keyframeSources[outSrc].componentCount = outComp;
+					keyframeSources[outSrc].data = parseSourceData(sourceDescs[outSrc].dataOffset, (DataType)outType, sourceDescs[outSrc].count);
+				}
+			}
+
+			anim.samplers.push_back(sampler);
+		}
+
+		// Parse channels
+		for (uint32_t c = 0; c < channelsCount; c++)
+		{
+			BDAEint channelPos = channelsOffset + c * 24;
+
+			AnimationChannel channel;
+			uint32_t sourceOffset, sourcePadding, channelType, typePadding, reserved1, reserved2;
+
+			memcpy(&sourceOffset, animBuffer + channelPos, sizeof(uint32_t));
+			memcpy(&sourcePadding, animBuffer + channelPos + 4, sizeof(uint32_t));
+			memcpy(&channelType, animBuffer + channelPos + 8, sizeof(uint32_t));
+			memcpy(&typePadding, animBuffer + channelPos + 12, sizeof(uint32_t));
+			memcpy(&reserved1, animBuffer + channelPos + 16, sizeof(uint32_t));
+			memcpy(&reserved2, animBuffer + channelPos + 20, sizeof(uint32_t));
+
+			channel.targetNodeName = readString(sourceOffset);
+			channel.channelType = (ChannelType)channelType;
+			channel.samplerIndex = c; // Channels and samplers are paired by index
+
+			anim.channels.push_back(channel);
+		}
+
+		animations.push_back(anim);
+		LOG("  Duration: ", anim.duration, " seconds");
+	}
+
+	free(animBuffer);
+	delete animFile;
+	delete animArchive;
+
+	animationsLoaded = true;
+	LOG("\n\033[1m\033[38;2;200;200;200m[Load] Loaded ", animations.size(), " animations.\033[0m\n");
+}
+
+//! Update animations based on elapsed time.
+void Model::updateAnimations(float deltaTime)
+{
+	if (!animationPlaying || animations.empty())
+		return;
+
+	// Find the maximum duration across all animations
+	float maxDuration = 0.0f;
+	for (const Animation &anim : animations)
+	{
+		if (anim.duration > maxDuration)
+			maxDuration = anim.duration;
+	}
+
+	// If no valid duration found, don't animate
+	if (maxDuration <= 0.0f)
+		return;
+
+	// Update time based on direction (forward or reverse for ping-pong)
+	float timeStep = deltaTime * animationSpeed;
+	if (animationReversed)
+		timeStep = -timeStep;
+
+	currentAnimationTime += timeStep;
+
+	// Handle looping based on mode
+	if (loopMode == AnimationLoopMode::PINGPONG)
+	{
+		// Ping-pong: reverse direction at boundaries
+		if (currentAnimationTime >= maxDuration)
+		{
+			currentAnimationTime = maxDuration;
+			animationReversed = true; // Start playing in reverse
+		}
+		else if (currentAnimationTime <= 0.0f)
+		{
+			currentAnimationTime = 0.0f;
+			animationReversed = false; // Start playing forward
+		}
+	}
+	else // AnimationLoopMode::LOOP
+	{
+		// Normal loop: wrap around to start
+		if (currentAnimationTime >= maxDuration)
+		{
+			currentAnimationTime = fmod(currentAnimationTime, maxDuration);
+		}
+	}
+
+	// Clamp time to valid range
+	float time = std::max(0.0f, std::min(currentAnimationTime, maxDuration));
+
+	// Apply all animations at the same time point
+	for (const Animation &anim : animations)
+	{
+		// Skip animations with zero duration (they contain no animation data)
+		if (anim.duration <= 0.0f)
+			continue;
+
+		// Each animation can have different duration, but we use the same time point
+		// If time exceeds this animation's duration, clamp to its end
+		float animTime = std::min(time, anim.duration);
+		applyAnimation(anim, animTime);
+	}
+
+	// Recalculate world transforms after animation
+	updateNodeTransforms();
+
+	// Update mesh transforms from animated nodes
+	updateMeshTransformsFromNodes();
+}
+
+//! Apply an animation at a specific time.
+void Model::applyAnimation(const Animation &anim, float time)
+{
+	// For each channel, find the keyframes and interpolate
+	for (const AnimationChannel &channel : anim.channels)
+	{
+		if (channel.samplerIndex < 0 || channel.samplerIndex >= (int)anim.samplers.size())
+			continue;
+
+		const AnimationSampler &sampler = anim.samplers[channel.samplerIndex];
+
+		// Get time and keyframe data
+		if (sampler.inputSourceIndex < 0 || sampler.inputSourceIndex >= (int)keyframeSources.size())
+			continue;
+		if (sampler.outputSourceIndex < 0 || sampler.outputSourceIndex >= (int)keyframeSources.size())
+			continue;
+
+		const KeyframeSource &timeSource = keyframeSources[sampler.inputSourceIndex];
+		const KeyframeSource &keyframeSource = keyframeSources[sampler.outputSourceIndex];
+
+		if (timeSource.data.empty() || keyframeSource.data.empty())
+			continue;
+
+		// Calculate actual keyframe count from output source
+		// The output source contains all keyframe data (e.g., vec3 or quat values)
+		// We need to divide by component count to get the number of keyframes
+		int actualKeyframeCount = keyframeSource.data.size() / sampler.outputComponentCount;
+
+		// Debug: Show mismatch if time source and output source have different counts
+		if ((int)timeSource.data.size() != actualKeyframeCount)
+		{
+			static bool warned = false;
+			if (!warned)
+			{
+				LOG("[Info] Time/Output count mismatch: time=", timeSource.data.size(),
+					", output=", actualKeyframeCount, " (", keyframeSource.data.size(),
+					"/", sampler.outputComponentCount, "). Using minimum.");
+				warned = true;
+			}
+		}
+
+		// Use the minimum of time source size and actual keyframe count to avoid out-of-bounds
+		int keyframeCount = std::min((int)timeSource.data.size(), actualKeyframeCount);
+
+		if (keyframeCount < 2)
+		{
+			// Not enough keyframes to interpolate
+			continue;
+		}
+
+		int keyframe0 = 0, keyframe1 = 0;
+		float t = 0.0f;
+
+		// Find keyframes
+		for (int i = 0; i < keyframeCount - 1; i++)
+		{
+			if (time >= timeSource.data[i] && time <= timeSource.data[i + 1])
+			{
+				keyframe0 = i;
+				keyframe1 = i + 1;
+				float t0 = timeSource.data[i];
+				float t1 = timeSource.data[i + 1];
+				t = (time - t0) / (t1 - t0);
+				break;
+			}
+		}
+
+		// If time is past the last keyframe, use the last keyframe
+		if (time >= timeSource.data[keyframeCount - 1])
+		{
+			keyframe0 = keyframe1 = keyframeCount - 1;
+			t = 0.0f;
+		}
+
+		// Find target node
+		auto nodeIt = nodeNameToIndex.find(channel.targetNodeName);
+		if (nodeIt == nodeNameToIndex.end())
+			continue;
+
+		int nodeIndex = nodeIt->second;
+		if (nodeIndex < 0 || nodeIndex >= (int)nodes.size())
+			continue;
+
+		Node &node = nodes[nodeIndex];
+
+		// Apply animation based on channel type
+		switch (channel.channelType)
+		{
+		case ChannelType::Translation:
+		{
+			int comp = sampler.outputComponentCount;
+			if (comp == 3)
+			{
+				// Bounds check
+				int maxIndex = keyframe1 * 3 + 2;
+				if (maxIndex >= (int)keyframeSource.data.size())
+				{
+					LOG("[Warning] Translation keyframe index out of bounds: ", maxIndex, " >= ", keyframeSource.data.size());
+					break;
+				}
+
+				glm::vec3 v0(keyframeSource.data[keyframe0 * 3 + 0],
+							 keyframeSource.data[keyframe0 * 3 + 1],
+							 keyframeSource.data[keyframe0 * 3 + 2]);
+				glm::vec3 v1(keyframeSource.data[keyframe1 * 3 + 0],
+							 keyframeSource.data[keyframe1 * 3 + 1],
+							 keyframeSource.data[keyframe1 * 3 + 2]);
+				node.localPosition = interpolateVec3(v0, v1, t, sampler.interpolation);
+			}
+			break;
+		}
+		case ChannelType::Rotation:
+		{
+			int comp = sampler.outputComponentCount;
+			if (comp == 4)
+			{
+				// Bounds check
+				int maxIndex = keyframe1 * 4 + 3;
+				if (maxIndex >= (int)keyframeSource.data.size())
+				{
+					LOG("[Warning] Rotation keyframe index out of bounds: ", maxIndex, " >= ", keyframeSource.data.size());
+					break;
+				}
+
+				glm::quat q0(keyframeSource.data[keyframe0 * 4 + 3],  // w
+							 keyframeSource.data[keyframe0 * 4 + 0],  // x
+							 keyframeSource.data[keyframe0 * 4 + 1],  // y
+							 keyframeSource.data[keyframe0 * 4 + 2]); // z
+				glm::quat q1(keyframeSource.data[keyframe1 * 4 + 3],
+							 keyframeSource.data[keyframe1 * 4 + 0],
+							 keyframeSource.data[keyframe1 * 4 + 1],
+							 keyframeSource.data[keyframe1 * 4 + 2]);
+
+				// Apply negation to w component (same as in node parsing)
+				q0.w = -q0.w;
+				q1.w = -q1.w;
+
+				node.localRotation = interpolateQuat(q0, q1, t, sampler.interpolation);
+			}
+			break;
+		}
+		case ChannelType::Scale:
+		{
+			int comp = sampler.outputComponentCount;
+			if (comp == 3)
+			{
+				// Bounds check
+				int maxIndex = keyframe1 * 3 + 2;
+				if (maxIndex >= (int)keyframeSource.data.size())
+				{
+					LOG("[Warning] Scale keyframe index out of bounds: ", maxIndex, " >= ", keyframeSource.data.size());
+					break;
+				}
+
+				glm::vec3 v0(keyframeSource.data[keyframe0 * 3 + 0],
+							 keyframeSource.data[keyframe0 * 3 + 1],
+							 keyframeSource.data[keyframe0 * 3 + 2]);
+				glm::vec3 v1(keyframeSource.data[keyframe1 * 3 + 0],
+							 keyframeSource.data[keyframe1 * 3 + 1],
+							 keyframeSource.data[keyframe1 * 3 + 2]);
+				node.localScale = interpolateVec3(v0, v1, t, sampler.interpolation);
+			}
+			break;
+		}
+		default:
+			break;
+		}
+	}
+}
+
+//! Interpolate between two floats.
+float Model::interpolateFloat(float a, float b, float t, InterpolationType interp)
+{
+	switch (interp)
+	{
+	case InterpolationType::STEP:
+		return a;
+	case InterpolationType::LINEAR:
+		return a + (b - a) * t;
+	case InterpolationType::HERMITE:
+		// Simplified hermite (cubic) interpolation
+		return a + (b - a) * (t * t * (3.0f - 2.0f * t));
+	default:
+		return a;
+	}
+}
+
+//! Interpolate between two vec3s.
+glm::vec3 Model::interpolateVec3(const glm::vec3 &a, const glm::vec3 &b, float t, InterpolationType interp)
+{
+	return glm::vec3(
+		interpolateFloat(a.x, b.x, t, interp),
+		interpolateFloat(a.y, b.y, t, interp),
+		interpolateFloat(a.z, b.z, t, interp));
+}
+
+//! Interpolate between two quaternions.
+glm::quat Model::interpolateQuat(const glm::quat &a, const glm::quat &b, float t, InterpolationType interp)
+{
+	switch (interp)
+	{
+	case InterpolationType::STEP:
+		return a;
+	case InterpolationType::LINEAR:
+	case InterpolationType::HERMITE:
+		// Use spherical linear interpolation (slerp) for quaternions
+		return glm::slerp(a, b, t);
+	default:
+		return a;
+	}
+}
+
+//! Start playing animations.
+void Model::playAnimation()
+{
+	animationPlaying = true;
+}
+
+//! Pause animations.
+void Model::pauseAnimation()
+{
+	animationPlaying = false;
+}
+
+//! Reset animation to beginning.
+void Model::resetAnimation()
+{
+	currentAnimationTime = 0.0f;
+
+	// Restore original transforms
+	for (Node &node : nodes)
+	{
+		node.localPosition = node.originalPosition;
+		node.localRotation = node.originalRotation;
+		node.localScale = node.originalScale;
+	}
+
+	// Recalculate world transforms
+	updateNodeTransforms();
 }

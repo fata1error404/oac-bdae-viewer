@@ -272,6 +272,81 @@ int main()
 			}
 
 			ourSound.updateSoundUI(bdaeModel.sounds);
+
+			// Animation controls
+			ImGui::NewLine();
+			ImGui::Text("Animations:");
+
+			if (!bdaeModel.animationsLoaded)
+			{
+				ImGui::TextWrapped("(Auto-load failed)");
+				if (ImGui::Button("Load Animation"))
+				{
+					IGFD::FileDialog::Instance()->OpenDialog(
+						"Animation_File_Dialog",
+						"Load Animation File",
+						".bdae",
+						cfg);
+				}
+			}
+			else
+			{
+				ImGui::Text("Loaded: %d animations", (int)bdaeModel.animations.size());
+
+				if (bdaeModel.animationPlaying)
+				{
+					if (ImGui::Button("Pause"))
+						bdaeModel.pauseAnimation();
+				}
+				else
+				{
+					if (ImGui::Button("Play"))
+						bdaeModel.playAnimation();
+				}
+
+				ImGui::SameLine();
+				if (ImGui::Button("Reset"))
+					bdaeModel.resetAnimation();
+
+				ImGui::PushItemWidth(130.0f);
+				ImGui::SliderFloat("Speed", &bdaeModel.animationSpeed, 0.1f, 3.0f);
+				ImGui::PopItemWidth();
+
+				// Loop mode selection
+				const char *loopModes[] = {"Loop", "Ping-Pong"};
+				int currentMode = (int)bdaeModel.loopMode;
+				ImGui::PushItemWidth(130.0f);
+				if (ImGui::Combo("Loop Mode", &currentMode, loopModes, 2))
+				{
+					bdaeModel.loopMode = (AnimationLoopMode)currentMode;
+				}
+				ImGui::PopItemWidth();
+
+				// Show current time and direction
+				ImGui::Text("Time: %.2f s %s", bdaeModel.currentAnimationTime,
+							bdaeModel.animationReversed ? "(reverse)" : "(forward)");
+
+				// Allow loading different animation
+				if (ImGui::Button("Load Different..."))
+				{
+					IGFD::FileDialog::Instance()->OpenDialog(
+						"Animation_File_Dialog",
+						"Load Animation File",
+						".bdae",
+						cfg);
+				}
+			}
+		}
+
+		// Animation file dialog
+		if (IGFD::FileDialog::Instance()->Display("Animation_File_Dialog", ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse))
+		{
+			if (IGFD::FileDialog::Instance()->IsOk())
+			{
+				std::map<std::string, std::string> selection = IGFD::FileDialog::Instance()->GetSelection();
+				bdaeModel.loadAnimations(selection.begin()->second.c_str());
+			}
+			IGFD::FileDialog::Instance()->Close();
 		}
 
 		if (terrainModel.terrainLoaded && isTerrainViewer)
@@ -320,6 +395,10 @@ int main()
 
 		if (!isTerrainViewer && bdaeModel.modelLoaded)
 		{
+			// Update animations
+			if (bdaeModel.animationsLoaded)
+				bdaeModel.updateAnimations(deltaTime);
+
 			bdaeModel.draw(glm::mat4(1.0f), view, projection, ourCamera.Position, ourLight.showLighting, displayBaseMesh); // render model
 
 			ourLight.draw(view, projection); // render light cube
