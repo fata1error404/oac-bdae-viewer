@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <unordered_map>
 #include <cstdint>
 #include "IReadResFile.h"
 #include "libs/glm/fwd.hpp"
@@ -120,35 +121,36 @@ struct Animation
 
 struct Node
 {
-	std::string id;				   // Node ID (e.g., "Bone001-node")
-	std::string name;			   // Node name (e.g., "Bone001")
+	std::string ID;				   // Node ID (e.g., "Bone001-node")
+	std::string mainName;		   // Node name (e.g., "Bone001")
+	std::string boneName;		   // Node name for skinning/bone mapping (e.g., "Bone1", "Bone2")
 	int parentIndex;			   // Index of parent node (-1 = root)
 	std::vector<int> childIndices; // Indices of child nodes
-	int dataOffset;				   // Offset in DataBuffer where node data is stored
 
 	// Local transform (relative to parent)
-	glm::vec3 localPosition;
+	glm::vec3 localTranslation;
 	glm::quat localRotation;
 	glm::vec3 localScale;
 
 	// Original transform (for animation reset)
-	glm::vec3 originalPosition;
-	glm::quat originalRotation;
-	glm::vec3 originalScale;
+	glm::vec3 defaultTranslation;
+	glm::quat defaultRotation;
+	glm::vec3 defaultScale;
 
 	// World transform (accumulated from root)
-	glm::mat4 worldTransform;
+	glm::mat4 totalTransform;
+	glm::mat4 pivotTransform; // Stores the initial pivot offset
 
 	Node()
 		: parentIndex(-1),
-		  dataOffset(0),
-		  localPosition(0),
+		  localTranslation(0),
 		  localRotation(1, 0, 0, 0),
 		  localScale(1),
-		  originalPosition(0),
-		  originalRotation(1, 0, 0, 0),
-		  originalScale(1),
-		  worldTransform(1.0f)
+		  defaultTranslation(0),
+		  defaultRotation(1, 0, 0, 0),
+		  defaultScale(1),
+		  totalTransform(1.0f),
+		  pivotTransform(1.0f)
 	{
 	}
 };
@@ -158,7 +160,7 @@ struct BDAEFileHeader
 {
 	unsigned int signature;									// 4 bytes  file signature – 'BRES' for .bdae file
 	unsigned short endianCheck;								// 2 bytes  byte order mark
-	unsigned short version;									// 2 bytes  version (?)
+	unsigned short version;									// 2 bytes  byte order mark
 	unsigned int sizeOfHeader;								// 4 bytes  header size in bytes
 	unsigned int sizeOfFile;								// 4 bytes  file size in bytes
 	unsigned int numOffsets;								// 4 bytes  number of entries in the offset table
@@ -188,14 +190,14 @@ class Model
 	int textureCount, alternativeTextureCount, selectedTexture;
 	unsigned int VAO;								  // Vertex Attribute Object ID (stores vertex attribute configuration on GPU)
 	unsigned int VBO;								  // Vertex Buffer Object ID (stores vertex data on GPU)
+	unsigned int boneWeightsVBO;					  // VBO for bone weights
+	unsigned int boneIndicesVBO;					  // VBO for bone IDs
 	std::vector<unsigned int> EBOs;					  // Element Buffer Object ID for each submesh (stores index data on GPU)
 	std::vector<float> vertices;					  // vertex data for whole model (x1, y1, z1, x2, y2, z2, .. )
 	std::vector<std::vector<unsigned short>> indices; // index data for each submesh (triangles)
 	std::vector<unsigned int> textures;				  // texture ID(s)
 	std::vector<std::string> sounds;				  // sound file name(s)
-	std::vector<glm::mat4> meshTransform;			  // local transformation matrix for each mesh
-	std::vector<glm::mat4> meshPivotOffset;			  // pivot offset for each mesh (for animation updates)
-	std::vector<int> submeshToMesh;
+	std::unordered_map<int, int> submeshToMeshIdx;
 	glm::vec3 meshCenter;
 
 	float meshPitch = 0.0f;
@@ -205,10 +207,20 @@ class Model
 	char *DataBuffer; // raw binary content of .bdae file
 
 	// Node hierarchy
-	std::vector<Node> nodes;					// All nodes in the model
-	std::map<std::string, int> nodeNameToIndex; // Quick lookup: node name -> index
-	std::map<int, int> nodeToMeshIndex;			// Maps node index to mesh index (for nodes that have corresponding meshes)
-	int nodeCollectionCount;					// Number of node collections in the model
+	std::vector<Node> nodes;								// All nodes in the model
+	std::unordered_map<std::string, int> nodeNameToIdx;		// Quick lookup: node name -> index
+	std::unordered_map<std::string, int> boneNameToNodeIdx; // // [TODO] this hash table should be used instead of indexing nodes with bone names
+	std::unordered_map<int, int> meshToNodeIdx;				// Maps mesh index to node index (reverse lookup for fast rendering)
+	int nodeCollectionCount;								// Number of node collections in the model
+
+	// Skinning data (bone weights and IDs per vertex)
+	std::vector<std::pair<char, float>> boneInfluences; // 4 influences per vertex (interleaved, ID & weight)
+	bool hasSkinningData;								// Whether the model has bone weights/IDs
+	std::vector<glm::mat4> boneTransforms;				// Final bone transformation matrices for skinning (sent to shader)
+	std::vector<glm::mat4> bindPoseMatrices;			// Inverse bind pose matrices (parsed from file)
+	std::unordered_map<int, int> boneToNodeIdx;			// Maps bone index -> node index (for correct bone transform lookup)
+	std::vector<std::string> boneNames;					// Actual bone names from file (e.g., "Bip01", "Bip01_Pelvis")
+	glm::mat4 bone001RootTransform;						// Global root transform for Bone001 (when it has no node)
 
 	// Node visualization
 	Shader nodeShader;						// Shader for rendering nodes
@@ -217,20 +229,23 @@ class Model
 	int nodeSphereIndexCount;				// Number of indices in unit sphere
 
 	// Animation data
-	std::vector<Animation> animations;			 // All animations
-	std::vector<KeyframeSource> keyframeSources; // All keyframe source data
-	bool animationsLoaded;						 // Whether animations have been loaded
-	float currentAnimationTime;					 // Current playback time
-	bool animationPlaying;						 // Whether animation is playing
-	float animationSpeed;						 // Playback speed multiplier
-	AnimationLoopMode loopMode;					 // How animation should loop
-	bool animationReversed;						 // Whether animation is playing in reverse (for ping-pong)
+	std::vector<std::string> animationFileNames;				 // List of all animation file paths
+	std::vector<std::vector<Animation>> animationSets;			 // Animation sets (one per file)
+	std::vector<std::vector<KeyframeSource>> keyframeSourceSets; // Keyframe sources (one per file)
+	int animationCount;											 // Number of animation files found
+	int selectedAnimation;										 // Currently selected animation file index
+	bool animationsLoaded;										 // Whether animations have been loaded
+	float currentAnimationTime;									 // Current playback time
+	bool animationPlaying;										 // Whether animation is playing
+	float animationSpeed;										 // Playback speed multiplier
+	AnimationLoopMode loopMode;									 // How animation should loop
+	bool animationReversed;										 // Whether animation is playing in reverse (for ping-pong)
 
 	Model(const char *vertex, const char *fragment)
 		: shader(vertex, fragment),
 		  nodeShader("shaders/default.vs", "shaders/default.fs"),
 		  totalSubmeshCount(0),
-		  VAO(0), VBO(0),
+		  VAO(0), VBO(0), boneWeightsVBO(0), boneIndicesVBO(0),
 		  nodeVAO(0), nodeVBO(0), nodeEBO(0),
 		  nodeSphereVertexCount(0),
 		  nodeSphereIndexCount(0),
@@ -238,6 +253,10 @@ class Model
 		  meshCenter(glm::vec3(-1.0f)),
 		  DataBuffer(NULL),
 		  nodeCollectionCount(0),
+		  hasSkinningData(false),
+		  bone001RootTransform(glm::mat4(1.0f)),
+		  animationCount(0),
+		  selectedAnimation(0),
 		  animationsLoaded(false),
 		  currentAnimationTime(0.0f),
 		  animationPlaying(false),
@@ -254,36 +273,48 @@ class Model
 		shader.setFloat("specularStrength", specularStrength);
 	}
 
-	//! Parses .bdae file and sets up model mesh and texture data.
+	// functions related to parsing
+	// implementation in parserBDAE.cpp
+	// ____________________
+
 	int init(IReadResFile *file);
 
-	//! Recursively parses child nodes to accumulate local transformation matrix for a single mesh (called in init).
-	void getNodeTransformation(int nodeInfoOffset, int nodeMeshIdx);
-	void getPivotOffset(int nodeInfoOffset, int nodeMeshIdx, bool skipFirst);
-
-	//! Loads .bdae file from disk, calls the parser and searches for alternative textures and sounds.
 	void load(const char *fpath, Sound &sound, bool isTerrainViewer);
 
-	//! Clears GPU memory and resets viewer state.
+	//! Recursively parses a node and its children.
+	void parseNodesRecursive(int nodeOffset, int parentIndex);
+
+	//! Recursively computes total transformation matrix for a node and its children.
+	void updateNodesTransformationsRecursive(int nodeIndex, const glm::mat4 &parentTransform);
+
+	//! [debug] Recursively prints the node tree.
+	void printNodesRecursive(int nodeIndex, const std::string &prefix, bool isLastChild);
+
+	//! Recursively searches down the tree starting from a given node for the first node with '_PIVOT' in its ID and returns its local transformation matrix.
+	glm::mat4 getPIVOTNodeTransformationRecursive(int nodeIndex);
+
+	void updateVertexBufferWithBoneData();
+
+	void searchAnimationFiles(const char *modelPath, bool isUnsortedFolder);
+
+	void loadAnimations(const char *animationFilePath);
+
+	// ____________________
+
 	void reset();
 
-	//! Renders .bdae model.
-	void draw(glm::mat4 model, glm::mat4 view, glm::mat4 projection, glm::vec3 cameraPos, bool lighting, bool simple);
+	void draw(glm::mat4 model, glm::mat4 view, glm::mat4 projection, glm::vec3 cameraPos, float dt, bool lighting, bool simple);
 
 	//! Node hierarchy functions
-	void parseNodeHierarchy();
-	void parseNodeRecursive(int nodeOffset, int parentIndex);
-	void updateNodeTransforms();
-	void updateNodeTransformsRecursive(int nodeIndex);
 	void updateMeshTransformsFromNodes();
-	void printNodeHierarchy(int nodeIndex, int depth);
+	void updateBoneTransforms();			  // Update bone transformation matrices for skinning
+	void debugBoneTransforms(float animTime); // Debug: Print detailed bone transform info
 
 	//! Node visualization functions
 	void generateUnitSphere();
 	void drawNodes(glm::mat4 model, glm::mat4 view, glm::mat4 projection);
 
 	//! Animation functions
-	void loadAnimations(const char *animationFilePath);
 	void updateAnimations(float deltaTime);
 	void applyAnimation(const Animation &anim, float time);
 	float interpolateFloat(float a, float b, float t, InterpolationType interp);

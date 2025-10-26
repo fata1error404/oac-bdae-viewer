@@ -11,7 +11,7 @@
 #include "terrain.h"
 #include "water.h"
 #include "CZipResReader.h"
-#include "parserBDAE.h"
+#include "model.h"
 #include "parserPHY.h"
 
 #define ChunksInTile (8 * 8)

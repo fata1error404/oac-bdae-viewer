@@ -12,13 +12,12 @@
 #include "libs/imgui/imgui_impl_glfw.h"		 // connects Dear ImGui with GLFW
 #include "libs/imgui/ImGuiFileDialog.h"		 // extension for file browsing dialog
 
-#include "shader.h"		// implementation of the graphics pipeline
-#include "camera.h"		// implementation of the camera system
-#include "sound.h"		// implementation of the sound playback
-#include "light.h"		// definition of the light settings and light cube
-#include "terrain.h"	// implementation of the terrain engine
-#include "parserBDAE.h" // parser for 3D models
-#include "parserTRN.h"	// parser for terrain meshes
+#include "shader.h"	 // implementation of the graphics pipeline
+#include "camera.h"	 // implementation of the camera system
+#include "sound.h"	 // implementation of the sound playback
+#include "light.h"	 // definition of the light settings and light cube
+#include "model.h"	 // BDAE Model: class for parsing .bdae file and rendering 3D model
+#include "terrain.h" // Game Engine: class for parsing .trn, .itm, .phy, .nav, .msk, and .shw files, and rendering 3D map
 
 #ifdef __linux__
 #include <GLFW/glfw3.h> // library for creating windows and handling input – mouse clicks, keyboard input, or window resizes
@@ -63,8 +62,8 @@ double lastY = DEFAULT_WINDOW_HEIGHT / 2.0; // starting cursor position (y-axis)
 bool fileDialogOpen = false;	   // flag that indicates whether to block all background inputs (when the file browsing dialog is open)
 bool settingsPanelHovered = false; // flag that indicated whether to block background mouse input (when interacting with the settings panel)
 bool displayBaseMesh = false;	   // flag that indicates base / textured mesh display mode
-bool displayNavMesh = false;	   // flag that indicates whether to show walkable areas
-bool displayPhysics = false;	   // flag that indicates whether to show walkable areas
+bool displayNavMesh = false;	   // flag that indicates whether to show walkable surfaces
+bool displayPhysics = false;	   // flag that indicates whether to show physical surfaces
 bool isTerrainViewer = false;
 
 int main()
@@ -135,7 +134,25 @@ int main()
 	cfg.sidePane = NULL;																   // no side panel
 	cfg.sidePaneWidth = 0.0f;															   // side panel width (unused)
 
-	unsigned int switchIcon;
+	// load button icons
+	unsigned int playIcon, stopIcon, switchIcon;
+
+	data = stbi_load("aux_docs/button_play.png", &width, &height, &nrChannels, 0);
+	glGenTextures(1, &playIcon);
+	glBindTexture(GL_TEXTURE_2D, playIcon);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+	stbi_image_free(data);
+
+	data = stbi_load("aux_docs/button_stop.png", &width, &height, &nrChannels, 0);
+	glGenTextures(1, &stopIcon);
+	glBindTexture(GL_TEXTURE_2D, stopIcon);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+	stbi_image_free(data);
+
 	data = stbi_load("aux_docs/button_switch.png", &width, &height, &nrChannels, 0);
 	glGenTextures(1, &switchIcon);
 	glBindTexture(GL_TEXTURE_2D, switchIcon);
@@ -248,7 +265,7 @@ int main()
 			IGFD::FileDialog::Instance()->Close();					  // close the dialog after handling OK or Cancel
 		}
 
-		// if a model is loaded, show its stats + checkboxes
+		// if a model is loaded, show its info and settings
 		if (bdaeModel.modelLoaded && !isTerrainViewer)
 		{
 			ImGui::Spacing();
@@ -271,104 +288,73 @@ int main()
 				ImGui::PopItemWidth();
 			}
 
-			ourSound.updateSoundUI(bdaeModel.sounds);
-
-			// Animation controls
-			ImGui::NewLine();
-			ImGui::Text("Animations:");
-
-			if (!bdaeModel.animationsLoaded)
+			if (bdaeModel.animationsLoaded)
 			{
-				ImGui::TextWrapped("(Auto-load failed)");
-				if (ImGui::Button("Load Animation"))
-				{
-					IGFD::FileDialog::Instance()->OpenDialog(
-						"Animation_File_Dialog",
-						"Load Animation File",
-						".bdae",
-						cfg);
-				}
-			}
-			else
-			{
-				ImGui::Text("Loaded: %d animations", (int)bdaeModel.animations.size());
+				ImGui::Spacing();
+				ImGui::Text("Animations: %d", bdaeModel.animationCount);
+				ImGui::Spacing();
 
-				if (bdaeModel.animationPlaying)
+				if (bdaeModel.animationCount > 1)
 				{
-					if (ImGui::Button("Pause"))
+					ImGui::PushItemWidth(130.0f);
+
+					if (ImGui::SliderInt("##animation_selector", &bdaeModel.selectedAnimation, 0, bdaeModel.animationCount - 1))
+					{
 						bdaeModel.pauseAnimation();
-				}
-				else
-				{
-					if (ImGui::Button("Play"))
-						bdaeModel.playAnimation();
+						bdaeModel.resetAnimation();
+					}
+
+					ImGui::PopItemWidth();
 				}
 
 				ImGui::SameLine();
-				if (ImGui::Button("Reset"))
-					bdaeModel.resetAnimation();
 
-				ImGui::PushItemWidth(130.0f);
-				ImGui::SliderFloat("Speed", &bdaeModel.animationSpeed, 0.1f, 3.0f);
-				ImGui::PopItemWidth();
+				ImGui::SetCursorPosY(ImGui::GetCursorPosY() - 4.0f);
+				ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+				ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0, 0, 0, 0));
+				ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0, 0, 0, 0));
 
-				// Loop mode selection
-				const char *loopModes[] = {"Loop", "Ping-Pong"};
-				int currentMode = (int)bdaeModel.loopMode;
-				ImGui::PushItemWidth(130.0f);
-				if (ImGui::Combo("Loop Mode", &currentMode, loopModes, 2))
+				if (ImGui::ImageButton("##animation_play_button", bdaeModel.animationPlaying ? stopIcon : playIcon, ImVec2(25, 25)))
 				{
-					bdaeModel.loopMode = (AnimationLoopMode)currentMode;
+					if (!bdaeModel.animationPlaying)
+						bdaeModel.playAnimation();
+					else
+						bdaeModel.pauseAnimation();
 				}
-				ImGui::PopItemWidth();
 
-				// Show current time and direction
-				ImGui::Text("Time: %.2f s %s", bdaeModel.currentAnimationTime,
-							bdaeModel.animationReversed ? "(reverse)" : "(forward)");
-
-				// Allow loading different animation
-				if (ImGui::Button("Load Different..."))
-				{
-					IGFD::FileDialog::Instance()->OpenDialog(
-						"Animation_File_Dialog",
-						"Load Animation File",
-						".bdae",
-						cfg);
-				}
+				ImGui::PopStyleColor(3);
 			}
-		}
 
-		// Animation file dialog
-		if (IGFD::FileDialog::Instance()->Display("Animation_File_Dialog", ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse))
-		{
-			if (IGFD::FileDialog::Instance()->IsOk())
-			{
-				std::map<std::string, std::string> selection = IGFD::FileDialog::Instance()->GetSelection();
-				bdaeModel.loadAnimations(selection.begin()->second.c_str());
-			}
-			IGFD::FileDialog::Instance()->Close();
+			ourSound.updateSoundUI(bdaeModel.sounds, playIcon, stopIcon);
 		}
 
 		if (terrainModel.terrainLoaded && isTerrainViewer)
 		{
 			ImGui::Spacing();
 			ImGui::TextWrapped("File:\xC2\xA0%s", terrainModel.fileName.c_str());
+
+			// [currently disabled]
 			// ImGui::Text("Size: %d Bytes", terrainModel.fileSize);
 			// ImGui::Text("Vertices: %d", terrainModel.vertexCount);
 			// ImGui::Text("Faces: %d", terrainModel.faceCount);
+
 			ImGui::Text("3D Models: %d", terrainModel.modelCount);
 			ImGui::NewLine();
 			ImGui::Checkbox("Base Mesh (K)", &displayBaseMesh);
 			ImGui::Spacing();
+
 			// ImGui::Checkbox("Walkable (N)", &displayNavMesh);
 			// ImGui::Spacing();
 			// ImGui::Checkbox("Physics (M)", &displayPhysics);
 			// ImGui::Spacing();
+
 			ImGui::Checkbox("Lighting (L)", &ourLight.showLighting);
 			ImGui::NewLine();
 			ImGui::TextWrapped("Terrain: %d x %d tiles", terrainModel.tilesX, terrainModel.tilesZ);
+
 			// ImGui::NewLine();
 			// ImGui::TextWrapped("Pitch: %.2f, Yaw: %.2f", ourCamera.Pitch, ourCamera.Yaw);
+
 			ImGui::Text("Position: (x, y, z)");
 			ImGui::Spacing();
 
@@ -379,7 +365,7 @@ int main()
 			ImGui::Text("x: min %d, max %d", (int)terrainModel.minX, (int)terrainModel.maxX);
 			ImGui::Text("z: min %d, max %d", (int)terrainModel.minZ, (int)terrainModel.maxZ);
 
-			ourSound.updateSoundUI(terrainModel.sounds);
+			ourSound.updateSoundUI(terrainModel.sounds, playIcon, stopIcon);
 		}
 
 		ImGui::End();
@@ -395,11 +381,7 @@ int main()
 
 		if (!isTerrainViewer && bdaeModel.modelLoaded)
 		{
-			// Update animations
-			if (bdaeModel.animationsLoaded)
-				bdaeModel.updateAnimations(deltaTime);
-
-			bdaeModel.draw(glm::mat4(1.0f), view, projection, ourCamera.Position, ourLight.showLighting, displayBaseMesh); // render model
+			bdaeModel.draw(glm::mat4(1.0f), view, projection, ourCamera.Position, deltaTime, ourLight.showLighting, displayBaseMesh); // render model
 
 			ourLight.draw(view, projection); // render light cube
 		}

@@ -4,7 +4,6 @@
 #include <string>
 #include <vector>
 #include <filesystem>
-#include "libs/stb_image.h"
 #include "libs/imgui/imgui.h"
 #include "libs/miniaudio.h" // library for audio playback
 
@@ -13,11 +12,10 @@ const std::filesystem::path soundPath("data/sound/"); // default directory with 
 class Sound
 {
   public:
-	ma_sound sound;					 // currently active sound instance
-	ma_engine engine;				 // audio engine instance managing playback and sound resources
-	bool soundPlaying;				 // flag that controls sound play button
-	unsigned int playIcon, stopIcon; // texture IDs for sound play button
-	int selectedSound;				 // index of the currently selected sound file path
+	ma_sound sound;	   // currently active sound instance
+	ma_engine engine;  // audio engine instance managing playback and sound resources
+	bool soundPlaying; // flag that controls sound play button
+	int selectedSound; // index of the currently selected sound file path
 
 	Sound(bool doNothing) {}
 
@@ -25,25 +23,7 @@ class Sound
 	{
 		// setup sound engine
 		soundPlaying = false;
-
 		ma_engine_init(NULL, &engine);
-
-		int width, height, nrChannels;
-		unsigned char *data = stbi_load("aux_docs/button_play.png", &width, &height, &nrChannels, 0);
-		glGenTextures(1, &playIcon);
-		glBindTexture(GL_TEXTURE_2D, playIcon);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
-		stbi_image_free(data);
-
-		data = stbi_load("aux_docs/button_stop.png", &width, &height, &nrChannels, 0);
-		glGenTextures(1, &stopIcon);
-		glBindTexture(GL_TEXTURE_2D, stopIcon);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
-		stbi_image_free(data);
 	}
 
 	//! Searches for '.wav' sound files on disk that contain model file name.
@@ -72,7 +52,7 @@ class Sound
 	}
 
 	//! Updates Dear ImGui sound interface each frame (sound selector and play button; shown only if a sound is detected).
-	void updateSoundUI(std::vector<std::string> &sounds)
+	void updateSoundUI(std::vector<std::string> &sounds, unsigned int playIcon, unsigned int stopIcon)
 	{
 		if (!sounds.empty())
 		{

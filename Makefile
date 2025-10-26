@@ -5,6 +5,7 @@ HEADER_DIRS = -Ilibs/oac/base \
 			  -Ilibs/oac/navmesh
 
 SOURCE_FILES = terrain.cpp \
+			   model.cpp \
 			   parserBDAE.cpp \
 			   parserTRN.cpp \
 		       libs/glad/glad.c \

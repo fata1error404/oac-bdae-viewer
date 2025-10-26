@@ -14,7 +14,7 @@
 #include "libs/glm/gtc/packing.hpp"
 #include "libs/glm/ext/vector_uint4.hpp"
 #include "libs/glm/gtc/type_precision.hpp"
-#include "parserBDAE.h"
+#include "model.h"
 #include "CZipResReader.h"
 #include "DetourNavMesh.h"
 

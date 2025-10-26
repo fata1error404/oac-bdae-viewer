@@ -1540,7 +1540,7 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool rende
 			if (!m)
 				continue;
 
-			m->draw(instModel, view, projection, camera.Position, light.showLighting, simple);
+			m->draw(instModel, view, projection, camera.Position, dt, light.showLighting, simple);
 		}
 	}
 
@@ -1549,8 +1549,8 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool rende
 	{
 		glDepthMask(GL_FALSE);
 		glDepthFunc(GL_LEQUAL);
-		sky.draw(glm::mat4(1.0f), glm::mat4(glm::mat3(view)), projection, camera.Position, false, false);
-		hill.draw(glm::mat4(1.0f), glm::mat4(glm::mat3(view)), projection, camera.Position, false, false);
+		sky.draw(glm::mat4(1.0f), glm::mat4(glm::mat3(view)), projection, camera.Position, dt, false, false);
+		hill.draw(glm::mat4(1.0f), glm::mat4(glm::mat3(view)), projection, camera.Position, dt, false, false);
 		glDepthFunc(GL_LESS);
 		glDepthMask(GL_TRUE);
 	}
