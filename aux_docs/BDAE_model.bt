@@ -1,0 +1,729 @@
+// 0x00FF00 – green
+// 0x00FFFF – yellow
+// 0x0000FF – red
+// 0x9ACD32 – reserved
+
+// UTILITY DATA STRUCTURES
+//________________________
+
+struct XY
+{
+    float           X                           <            bgcolor=0x00FF00, name="X">;
+    float           Y                           <            bgcolor=0x00FF00, name="Y">;
+};
+
+struct XYZ
+{
+    float           X                           <            bgcolor=0x00FF00, name="X">;
+    float           Y                           <            bgcolor=0x00FF00, name="Y">;
+    float           Z                           <            bgcolor=0x00FF00, name="Z">;
+};
+
+struct XYZW
+{
+    float           X                           <            bgcolor=0x00FF00, name="X">;
+    float           Y                           <            bgcolor=0x00FF00, name="Y">;
+    float           Z                           <            bgcolor=0x00FF00, name="Z">;
+    float           W                           <            bgcolor=0x00FF00, name="W">;
+};
+
+struct BOUNDING_BOX
+{
+    XYZ             corner_1                    <            bgcolor=0x00FF00, name="Corner 1">;
+    XYZ             corner_2                    <            bgcolor=0x00FF00, name="Corner 2">;
+};
+
+struct FVF32
+{
+    XYZ             coordinates                 <                              name="Coordinates">;
+    XYZ             normals                     <                              name="Normals">;
+    XY              uvs                         <                              name="UVs">;
+};
+
+struct FVF36
+{
+    XYZ             coordinates                 <                              name="Coordinates">;
+    XYZ             normals                     <                              name="Normals">;
+    XY              uvs                         <                              name="UVs">;
+    float           unknown;
+};
+
+struct FVF56
+{
+    XYZ             coordinates                 <                              name="Coordinates">;
+    XYZ             normals                     <                              name="Normals">;
+    XY              uvs                         <                              name="UVs">;
+    float           unknown[6]                  <            bgcolor=0x0000FF>;
+};
+
+// HEADER
+// ______
+
+// 80 bytes
+struct BDAEHeader
+{
+    uchar           signature[4]                <            bgcolor=0x00FF00, name="File Signature">;
+    short           endian_check                <            bgcolor=0x00FF00, name="Byte Order Mark">;
+    short           version                     <            bgcolor=0x00FFFF, name="Version">;
+    uint            header_size                 <format=hex, bgcolor=0x00FF00, name="Header Size">;
+    uint            file_size                   <format=hex, bgcolor=0x00FF00, name="File Size">;
+    uint            offset_count                <            bgcolor=0x00FF00, name="Offset Count">;
+    uint            file_origin                 <            bgcolor=0x00FFFF, name="File Origin">;
+    uint64          offset_table_offset         <format=hex, bgcolor=0x00FF00, name="Offset Table Offset",       comment="absolute">;
+    uint64          string_table_offset         <format=hex, bgcolor=0x00FF00, name="String Table Offset",       comment="absolute">;
+    uint64          model_info_section_offset   <format=hex, bgcolor=0x00FF00, name="Model Info Section Offset", comment="absolute">;
+    uint64          related_files_offset        <format=hex, bgcolor=0x00FFFF, name="Related Files Offset",      comment="absolute">;
+    uint64          model_data_section_offset   <format=hex, bgcolor=0x00FF00, name="Model Data Section Offset", comment="absolute">;
+    uint            model_data_section_length   <            bgcolor=0x00FF00, name="Model Data Section Length">;
+    uint            removable_chunk_count       <            bgcolor=0x00FFFF, name="Removable Chunk Count">;
+    uint            use_separate_allocation     <            bgcolor=0x00FFFF, name="Removable Chunk Allocation Mode">;
+    uint            dynamic_chunk_size          <            bgcolor=0x00FFFF, name="Dynamic Chunk Size">;
+};
+
+// OFFSET TABLE
+// ____________
+
+struct BDAEOffsets
+{
+    local int i = 0;
+
+    for (i = 0; i < header.offset_count; i++)
+        uint64      offset_entry                <format=hex, bgcolor=0x00FF00, name="Offset">;
+};
+
+// STRING TABLE
+// ____________
+
+string getStringFromTable(uint offset)
+{
+    uint fpos = FTell(); // save position
+    FSeek(offset);
+    
+    string s = ReadString(offset);
+    
+    FSeek(fpos); // restore position
+    
+    return s;
+}
+
+uint realStringStrength(uint size) {
+    return (size == 0) ? 0 : ((int)(size / 4) + 1) * 4; // align to the next 4 bytes
+}
+
+struct String
+{
+    uint            string_length               <            bgcolor=0x00FF00>;
+    
+    if (string_length > 0)
+        char        string_value[realStringStrength(string_length)] <bgcolor=0x00FF00>;
+};
+
+struct BDAEStrings
+{
+    local uint currPos = FTell();
+
+    // keep reading strings until reaching the start of the Model Info section
+    while (currPos + 1 <= header.model_info_section_offset) {
+        FSeek(currPos);
+        String      s             <                              name="String">;           // read one String structure
+        currPos = currPos + sizeof(s.string_length) + realStringStrength(s.string_length); // advance position
+    }
+};
+
+// GENERAL MODEL INFO
+// __________________
+
+struct BDAEVersionInfo
+{
+    uint            version_string_offset           <format=hex, bgcolor=0x00FF00, name="Version String Offset",           comment=getStringFromTable>;
+    int             reserved[5]                     <            bgcolor=0x9ACD32, name="Reserved">;
+};
+
+struct BDAEAnimationsInfo
+{
+    uint            reserved[6]                     <            bgcolor=0x9ACD32, name="Reserved",                        comment="Seem to be a section mark.">;
+    int             animation_range_start           <            bgcolor=0x00FFFF, name="Animation Range Start",           comment="This data only in animation .bdae file.">;
+    int             animation_range_end             <            bgcolor=0x00FFFF, name="Animation Range End">;
+    int             animation_count                 <            bgcolor=0x00FF00, name="Animation Count">;
+    int             animation_metadata_offset       <            bgcolor=0x00FF00, name="Animation Metadata Offset",       comment="relative">;
+    uint            unknown[8]                      <            bgcolor=0x0000FF, name="unknown">;
+};
+
+struct BDAETexturesInfo
+{
+    uint            texture_count                   <            bgcolor=0x00FF00, name="Texture Count">;
+    uint            texture_metadata_offset         <format=hex, bgcolor=0x00FF00, name="Texture Metadata Offset",         comment="relative">;
+
+    local uint real_texture_metadata_offset = FTell() - sizeof(uint) + texture_metadata_offset; // calculate absolute offset
+};
+
+struct BDAEMaterialsInfo
+{
+    uint            material_count                  <            bgcolor=0x00FF00, name="Material Count">;
+    uint            material_metadata_offset        <format=hex, bgcolor=0x00FF00, name="Material Metadata Offset",        comment="relative">;
+
+    local uint real_material_metadata_offset = FTell() - sizeof(uint) + material_metadata_offset;
+};
+
+struct BDAEMeshesInfo
+{
+    uint            mesh_count                      <            bgcolor=0x00FF00, name="Mesh Count">;
+    uint            mesh_metadata_offset            <format=hex, bgcolor=0x00FF00, name="Mesh Metadata Offset",            comment="relative">;
+    
+    local uint real_mesh_metadata_offset = FTell() - sizeof(uint) + mesh_metadata_offset;
+};
+
+struct BDAEMeshSkinsInfo
+{
+    uint            mesh_skin_count                 <            bgcolor=0x00FF00, name="Mesh Skin Count">;
+    uint            mesh_skin_metadata_offset       <format=hex, bgcolor=0x00FF00, name="Mesh Skin Metadata Offset",       comment="relative">;
+
+    local uint real_mesh_skin_metadata_offset = FTell() - sizeof(uint) + mesh_skin_metadata_offset;
+};
+
+struct BDAENodeTreesInfo
+{
+    uint            node_tree_count                 <            bgcolor=0x00FF00, name="Node Tree Count">;
+    uint            node_tree_metadata_offset       <format=hex, bgcolor=0x00FF00, name="Node Tree Metadata Offset",       comment="relative">;
+
+    local uint real_node_tree_metadata_offset = FTell() - sizeof(uint) + node_tree_metadata_offset;
+};
+
+
+struct BDAEUnknownInfo
+{
+    uint            unknown_count                   <            bgcolor=0x0000FF, name="unknown count">;
+    uint            unknown_metadata_offset         <            bgcolor=0x0000FF, name="unknown metadata offset">;
+};
+
+struct BDAEModelInfo
+{
+    BDAEVersionInfo         version_info            <                              name="Version Info">;
+    BDAEAnimationsInfo      animations_info         <                              name="Animations Info">;
+    BDAETexturesInfo        textures_info           <                              name="Textures Info">;
+    BDAEUnknownInfo         unknown_info_1          <                              name="unknown">;
+    BDAEMaterialsInfo       materials_info          <                              name="Materials Info">;
+    BDAEMeshesInfo          meshes_info             <                              name="Meshes Info">;
+    BDAEMeshSkinsInfo       mesh_skins_info         <                              name="Mesh Skins Info">;
+    BDAEUnknownInfo         unknown_info_2[4]       <                              name="unknown">;
+    BDAENodeTreesInfo       node_trees_info         <                              name="Node Trees Info">;
+    BDAEUnknownInfo         unknown_info_3[4]       <                              name="unknown">;
+};
+
+// MODEL DATA
+// __________
+
+// ----- Textures Metadata -----
+
+struct BDAETextureMetadata
+{
+    uint64          map_name                        <            bgcolor=0x00FF00, name="Tetxure Map Name",                comment=getStringFromTable>;
+    uint64          map_name_friendly               <            bgcolor=0x00FF00, name="Tetxure Map Name Friendly",       comment=getStringFromTable>;
+    uint64          texture_file                    <            bgcolor=0x00FF00, name="Texture File Name",               comment=getStringFromTable>;
+    uint64          reserved[2]                     <            bgcolor=0x9ACD32, name="Reserved">;
+};
+
+struct BDAETexturesMetadata
+{
+    local int i;
+
+    for (i = 0; i < model_info.textures_info.texture_count; i++)
+        BDAETextureMetadata  texture  <name="Texture">;
+};
+
+
+
+
+// ----- Materials Metadata -----
+
+struct BDAEMaterialMetadata
+{
+    uint64          material_name                   <            bgcolor=0x00FF00, name="Material Name",                   comment=getStringFromTable>;
+    uint64          material_name_friendly          <            bgcolor=0x00FF00, name="Material Name Friendly",          comment=getStringFromTable>;
+    uint64          material_file                   <            bgcolor=0x00FF00, name="Material File Name",              comment=getStringFromTable>;
+    uint64          shader_name                     <            bgcolor=0x00FF00, name="Shader Name",                     comment=getStringFromTable>;
+    uint            property_count                  <            bgcolor=0x00FF00, name="Property Count">;
+    uint            property_data_offset            <            bgcolor=0x00FF00, name="Property Data Offset",            comment="relative">;
+    uint            unknown[4]                      <            bgcolor=0x0000FF, name="unknown">;
+    
+    local uint64 real_property_data_offset = FTell() - 5 * sizeof(uint) + property_data_offset;
+};
+
+struct BDAEMaterialsMetadata
+{
+    local int i;
+
+    for (i = 0; i < model_info.materials_info.material_count; i++)
+        BDAEMaterialMetadata  material  <name="Material">;
+};
+
+// ----- Materials Data -----
+
+string matchPropertyTypeName(uint property_type)
+{
+    switch(property_type)
+    {
+        case 0:  return "INT";
+        case 1:  return "INT2";
+        case 2:  return "INT3";
+        case 3:  return "INT4";
+        case 4:  return "FLOAT";
+        case 5:  return "FLOAT2";
+        case 6:  return "FLOAT3";
+        case 7:  return "FLOAT4";
+        case 8:  return "FLOAT2x2";
+        case 9:  return "FLOAT3x3";
+        case 10: return "FLOAT4x4";
+        case 11: return "SAMPLER2D";
+        case 12: return "SAMPLER3D";
+        case 13: return "SAMPLER_CUBE";
+        case 14: return "SAMPLER_RECT";
+        case 15: return "COLOR";
+        case 16: return "COLORF";
+        case 17: return "LIGHT";
+        case 18: return "SURFACE";
+        case 19: return "URL";
+        case 20: return "TECHNIQUE";
+        default: return Str("UNKNOWN_TYPE_%u", property_type);
+    }
+}
+
+struct BDAEMaterialPropertyMetadata
+{
+    uint64          property_name                   <            bgcolor=0x00FF00, name="Property Name",                   comment=getStringFromTable>;
+    uint64          property_name_friendly          <            bgcolor=0x00FF00, name="Property Name Friendly",          comment=getStringFromTable>;
+    uint            property_type                   <            bgcolor=0x00FF00, name="Property Type",                   comment=matchPropertyTypeName>;
+    uint            extra_data_count                <            bgcolor=0x00FFFF, name="Extra Data Count">;
+    uint            extra_data_offset               <            bgcolor=0x00FFFF, name="Extra Data Offset",               comment="relative">;
+    uint            primary_value_offset            <            bgcolor=0x00FFFF, name="Primary Value Offset",            comment="relative">;
+
+    local uint64 real_property_extra_data_offset = FTell() - 2 * sizeof(uint) + extra_data_offset;
+};
+
+// this data has a different meaning based on the property type
+// [TODO] display corresponding to the property type
+struct BDAEMaterialPropertyData
+{
+    uint64          count                           <            bgcolor=0x00FFFF, name="Count",                           comment="usually 1">; // equals to extra_data_count
+    uint64          primary_value                   <            bgcolor=0x00FFFF, name="Primary Value",                   comment="profile ID / texture unit / alpharef float value / ..">;
+    uint64          secondary_value                 <            bgcolor=0x00FFFF, name="Secondary Value",                 comment="0 / offset to string table / ..">;
+};
+
+struct BDAEMaterialProperties
+{
+    local int j;
+
+    // iterate over each material's property
+    for (j = 0; j < materials.material[materials_data.i].property_count; j++)
+        BDAEMaterialPropertyMetadata  material_property  <name="Material Property Metadata">;
+
+    for (j = 0; j < materials.material[materials_data.i].property_count; j++)
+    {
+        FSeek(material_data.material_property[j].real_property_extra_data_offset);
+        BDAEMaterialPropertyData  material_property_data  <name="Material Property Data">;
+    }
+};
+
+struct BDAEMaterialsData
+{
+    local int i;
+    
+    // iterate over each material
+    for (i = 0; i < model_info.materials_info.material_count; i++)
+    {
+        FSeek(materials.material[i].real_property_data_offset);
+        BDAEMaterialProperties  material_data  <name="Material">;
+    }
+};
+
+
+
+
+// ----- Meshes Metadata -----
+
+struct BDAEMeshMetadata
+{
+    uint64          mesh_name                       <            bgcolor=0x00FF00, name="Mesh Name",                       comment=getStringFromTable>;
+    uint64          mesh_name_friendly              <            bgcolor=0x00FF00, name="Mesh Name Friendly",              comment=getStringFromTable>;
+    uint            reserved                        <            bgcolor=0x9ACD32, name="Reserved">;
+    uint            mesh_data_offset                <            bgcolor=0x00FF00, name="Mesh Data Offset",                comment="relative">;
+
+    local uint real_mesh_data_offset = FTell() - sizeof(uint) + mesh_data_offset;
+};
+
+struct BDAEMeshesMetadata
+{
+    local int i;
+
+    for (i = 0; i < model_info.meshes_info.mesh_count; i++)
+        BDAEMeshMetadata  mesh  <name="Mesh">;
+};
+
+// ----- Meshes Data -----
+
+struct BDAESubmeshData
+{
+    uint64          material_name                   <            bgcolor=0x00FF00, name="Material Name",                   comment=getStringFromTable>;
+    uint            face_count                      <            bgcolor=0x00FF00, name="Face Count",                      comment="number of triangles">;
+    int             unused[5]                       <            bgcolor=0x00FFFF, name="unused">;
+    uint            first_vertex_index              <            bgcolor=0x00FF00, name="First Vertex Index">;
+    uint            last_vertex_index               <            bgcolor=0x00FF00, name="Last Vertex Index",               comment="highest vertex index used by this submesh">;
+    uint            index_count                     <            bgcolor=0x00FF00, name="Index Count",                     comment="number of triangles * 3">;
+    uint            reserved_1                      <            bgcolor=0x9ACD32, name="Reserved">;
+    uint            index_data_offset               <            bgcolor=0x00FF00, name="Submesh Index Data Offset",       comment="absolute">;
+    uint            reserved_2[5]                   <            bgcolor=0x9ACD32, name="Reserved">;
+};
+
+struct BDAEMeshData
+{
+    uint            is_interleaved                  <            bgcolor=0x00FFFF, name="Vertex Data Layout",              comment="1 = interleaved, 0 = separate">;
+    uint            vertex_count                    <            bgcolor=0x00FF00, name="Vertex Count">;
+    uint            unknown_1                       <            bgcolor=0x0000FF, name="unknown",                         comment="usually 40">;
+    uint            submesh_count                   <            bgcolor=0x00FF00, name="Submesh Count">;
+    uint            submesh_data_offset             <            bgcolor=0x00FF00, name="Submesh Data Offset",             comment="relative">;
+    
+    local uint real_submesh_data_offset = FTell() - sizeof(uint) + submesh_data_offset;
+    
+    BOUNDING_BOX    bounding_box                    <            bgcolor=0x00FF00, name="Bounding Box">;
+    uint            reserved_1                      <            bgcolor=0x9ACD32, name="Reserved">;
+    uint            bytes_per_vertex                <            bgcolor=0x00FF00, name="Bytes Per Vertex">;
+    uint            unknown_2[8]                    <            bgcolor=0x0000FF, name="unknown">;
+    uint            reserved_2                      <            bgcolor=0x9ACD32, name="Reserved">;
+    uint            vertex_data_offset              <            bgcolor=0x00FF00, name="Mesh Vertex Data Offset",         comment="absolute">;
+    
+    local int unknown_3_count = (real_submesh_data_offset - FTell()) / sizeof(uint) + 2;
+
+    uint            unknown_3[unknown_3_count]      <            bgcolor=0x0000FF, name="unknown">;
+    
+    local int i;
+
+    for (i = 0; i < submesh_count; i++)
+        BDAESubmeshData  submesh_data  <name="Submesh">;
+};
+
+struct BDAEMeshesData
+{
+    local int i;
+
+    for (i = 0; i < model_info.meshes_info.mesh_count; i++)
+    {
+        FSeek(meshes.mesh[i].real_mesh_data_offset);
+        BDAEMeshData  mesh_data  <name="Mesh">;
+    }
+};
+
+
+
+
+// ----- Mesh Skins Metadata -----
+
+struct BDAEMeshSkinMetadata
+{
+    uint            reserved[2]                     <            bgcolor=0x9ACD32, name="Reserved">;
+    uint64          mesh_skin_name                  <            bgcolor=0x00FF00, name="Mesh Skin Name",                  comment=getStringFromTable>;
+    uint64          mesh_skin_data_offset           <            bgcolor=0x00FF00, name="Mesh Skin Data Offset",           comment="relative">;
+
+    local uint64 real_mesh_skin_data_offset = FTell() - sizeof(uint64) + mesh_skin_data_offset;
+};
+
+struct BDAEMeshSkinsMetadata
+{
+    local int i;
+
+    for (i = 0; i < model_info.mesh_skins_info.mesh_skin_count; i++)
+        BDAEMeshSkinMetadata  mesh_skin  <name="Mesh Skin">;
+};
+
+// ----- Mesh Skins Data -----
+
+struct BDAEMeshSkinData
+{
+    uint            data_1_float_count              <            bgcolor=0x00FF00, name="Bind Pose Matrices Element Count",comment="bone count * 16 (4 x 4 matrix for each bone)">;
+    uint            data_1_offset                   <            bgcolor=0x00FF00, name="Bind Pose Matrices Data Offset",  comment="relative">;
+
+    local uint offset_1 = FTell() - sizeof(uint) + data_1_offset;
+    
+    uint            data_2_float_count              <            bgcolor=0x00FF00, name="Dual Quaternions Element Count",  comment="bone count * 8 (4 x 2 structure for each bone)">;
+    uint            data_2_offset                   <            bgcolor=0x00FF00, name="Dual Quaternions Data Offset",    comment="relative">;
+    
+    local uint offset_2 = FTell() - sizeof(uint) + data_2_offset;
+    
+    XYZ             bind_shape_transform[8]         <            bgcolor=0x00FFFF, name="Bind Shape Transformation",       comment="transforms all mesh vertices from local space into bind pose space where skeletal animation occurs">;
+    
+    uint64          mesh_name                       <            bgcolor=0x00FF00, name="Mesh Name",                       comment=getStringFromTable>;
+    uint            bone_count                      <            bgcolor=0x00FF00, name="Bone Count",                      comment="number of bones influencing this mesh">;
+    uint            bone_names_offset               <            bgcolor=0x00FF00, name="Bone Names Offset",               comment="relative">;
+
+    local uint64 offset_3 = FTell() - sizeof(uint) + bone_names_offset;
+
+    uint64          skinned_vertex_count            <            bgcolor=0x00FF00, name="Skinned Vertex Count",            comment="vertices influenced by bones">;
+    uint64          skinned_vertex_data_offset      <            bgcolor=0x00FF00, name="Skinned Vertex Data Offset",      comment="absolute">;
+    uint64          unknown_count_2                 <            bgcolor=0x0000FF, name="unknown count 2",                 comment="bone count (duplicated)">;
+    uint64          unknown_data_2_offset           <            bgcolor=0x0000FF, name="unknown data 2 offset",           comment="absolute">;
+    uint            bbox_count                      <            bgcolor=0x00FF00, name="Bone Bounding Box Count",         comment="bone count (duplicated)">;
+    uint            bbox_data_offset                <            bgcolor=0x00FF00, name="Bone Bounding Box Data Offset",   comment="relative">;
+
+    local uint64 offset_4 = FTell() - sizeof(uint) + bbox_data_offset;
+
+    uint64          reserved                        <            bgcolor=0x9ACD32, name="Reserved">;
+    uint64          max_influence                   <            bgcolor=0x00FFFF, name="Max Influence",                   comment="how many bones can influence one vertex">;
+    
+    FSeek(offset_1);
+
+    float           data_1[data_1_float_count]      <            bgcolor=0x00FF00, name="Bind Pose Matrices",              comment="transforms mesh vertices influenced by a bone from bind pose space to bone's local space">;
+
+    FSeek(offset_2);
+
+    float           data_2[data_2_float_count]      <            bgcolor=0x00FF00, name="Dual Quaternions",                comment="alternative compact representation of bind pose matrices" >;
+
+    FSeek(offset_3);
+
+    uint64          bone_names[bone_count]          <            bgcolor=0x00FF00, name="Bone Names",                      comment=getStringFromTable>;
+
+    FSeek(offset_4);
+
+    BOUNDING_BOX    bounding_boxes[bbox_count]      <            bgcolor=0x00FF00, name="Bounding Boxes",                  comment="AABB that encloses all mesh vertices influenced by a bone">;
+};
+
+struct BDAEMeshSkinsData
+{
+    local int i;
+
+    for (i = 0; i < model_info.mesh_skins_info.mesh_skin_count; i++)
+    {
+        FSeek(mesh_skins.mesh_skin[i].real_mesh_skin_data_offset);
+        BDAEMeshSkinData  mesh_skin_data  <name="Mesh Skin">;
+    }
+};
+
+
+
+
+// ----- Node Trees Metadata -----
+
+struct BDAENodeTreeMetadata
+{
+    uint64          node_tree_name                  <            bgcolor=0x00FF00, name="Node Tree Name",                  comment=getStringFromTable>;
+    uint64          node_tree_name_friendly         <            bgcolor=0x00FF00, name="Node Tree Name Friendly",         comment=getStringFromTable>;
+    uint            root_node_count                 <            bgcolor=0x00FF00, name="Root Node Count">;
+    uint            node_tree_data_offset           <            bgcolor=0x00FF00, name="Node Tree Data Offset",           comment="relative">;
+
+    local uint real_node_tree_data_offset = FTell() - sizeof(uint) + node_tree_data_offset;
+};
+
+struct BDAENodeTreesMetadata
+{
+    local int i;
+
+    for (i = 0; i < model_info.node_trees_info.node_tree_count; i++)
+        BDAENodeTreeMetadata  node_tree  <name="Node Tree">;
+};
+
+// ----- Node Trees Data -----
+
+struct BDAENode
+{
+    uint64          node_name                       <            bgcolor=0x00FF00, name="Node Name",                       comment=getStringFromTable>;
+    uint64          node_name_friendly              <            bgcolor=0x00FF00, name="Node Name Friendly",              comment=getStringFromTable>;
+    uint64          node_name_for_skinning          <            bgcolor=0x00FF00, name="Node Name Reference",             comment=getStringFromTable>;
+    XYZ             position                        <            bgcolor=0x00FF00, name="Node Position">;
+    XYZW            rotation                        <            bgcolor=0x00FF00, name="Node Rotation">;
+    XYZ             scale                           <            bgcolor=0x00FF00, name="Node Scale">;
+    uint            visibility                      <            bgcolor=0x00FFFF, name="Visibility Flag">;
+    uint            children_count                  <            bgcolor=0x00FF00, name="Child Node Count">;
+    uint            children_data_ofset             <            bgcolor=0x00FF00, name="Child Node Data Offset",          comment="relative">;
+    uint            instances_count                 <            bgcolor=0x00FFFF, name="Attached Instance Count",         comment="attached objects: meshes, cameras, lights, controllers">;
+    uint64          instances_offset                <            bgcolor=0x00FFFF, name="Attached Instance Data Offset",   comment="relative">;
+    uint64          reserved                        <            bgcolor=0x9ACD32, name="Reserved">;
+
+    // [TODO] recursively parse child nodes
+};
+
+struct BDAENodeTreeData
+{
+    local int i;
+    
+    for (i = 0; i < node_trees.node_tree.root_node_count; i++)
+        BDAENode  node_tree_data  <name="Root Node">;
+};
+
+struct BDAENodeTreesData
+{
+    local int i;
+
+    for (i = 0; i < model_info.node_trees_info.node_tree_count; i++)
+    {
+        FSeek(node_trees.node_tree[i].real_node_tree_data_offset);
+        BDAENodeTreeData  node_tree_data  <name="Node Tree">;
+    }
+};
+
+
+
+
+// ----- Removable Chunks Metadata -----
+
+struct BDAERemovableChunkMetadata
+{
+    uint64          chunk_data_length               <            bgcolor=0x00FFFF, name="Chunk Data Length">;
+    uint64          chunk_data_offset               <            bgcolor=0x00FFFF, name="Chunk Data Offset",               comment="absolute">;
+};
+
+struct BDAERemovableChunks
+{
+    local uint i;
+
+    for (i = 0; i < header.removable_chunk_count; i++)
+        BDAERemovableChunkMetadata  removable_chunk  <name="Removable Chunk">;
+};
+
+
+
+
+// ----- Vertex Data -----
+
+struct BDAEMeshVertices
+{
+    local string template = "Unhandled bytes per vertex size = %d.";
+    local string warning;
+
+    uint            marker                          <            bgcolor=0x00FF00, name="Section Marker">;
+
+    local int j;
+
+    for (j = 0; j < meshes_data.mesh_data[i].vertex_count; j++)
+    {
+        switch (meshes_data.mesh_data[i].bytes_per_vertex)
+        {
+            case 32: FVF32  vertex                  <            bgcolor=0x00FF00, name="Vertex">; break;
+            case 36: FVF36  vertex                  <            bgcolor=0x00FF00, name="Vertex">; break;
+            case 56: FVF56  vertex                  <            bgcolor=0x00FF00, name="Vertex">; break;
+            default: 
+                SPrintf(warning, template, meshes_data.mesh_data[i].bytes_per_vertex);
+                Warning(warning);
+        }
+    }
+};
+
+struct BDAEVertexData
+{
+    local int i;
+
+    for (i = 0; i < model_info.meshes_info.mesh_count; i++)
+    {
+        FSeek(meshes_data.mesh_data[i].vertex_data_offset);
+        BDAEMeshVertices  mesh_vertices  <name="Mesh">;
+    }
+};
+
+
+
+
+// ----- Bones Data -----
+
+struct BoneInfluence
+{
+    char            bone_indices[4]                 <            bgcolor=0x00FF00, name="Bone Indices">;
+    float           bone_weights[3]                 <            bgcolor=0x00FF00, name="Bone Weights">;
+};
+
+struct BDAEBoneInfluences
+{
+    local int j;
+
+    for (j = 0; j < mesh_skins_data.mesh_skin_data[i].skinned_vertex_count / (mesh_skins_data.mesh_skin_data[0].max_influence + 1); j++)
+        BoneInfluence  bone_influence  <bgcolor=0x00FF00, name="Skinned Vertex">;
+};
+
+struct BDAEBonesData
+{
+    uint            unknown                         <            bgcolor=0x0000FF, name="unknown">;
+
+    local int i;
+
+    for (i = 0; i < model_info.mesh_skins_info.mesh_skin_count; i++)
+    {
+        FSeek(mesh_skins_data.mesh_skin_data[i].skinned_vertex_data_offset + sizeof(int));
+        BDAEBoneInfluences  mesh_skin  <name="Mesh Skin">;
+    }
+};
+
+/*
+struct BDAEBoneNewData
+{
+    uint64          unknown_offset                  <            bgcolor=0x0000FF, name="unknown",                         comment="absolute">;
+    uint64          unknown_count                   <            bgcolor=0x00FFFF, name="Bone Influenced Vertex Count">;
+};
+
+struct BDAEBoneUnknown
+{
+    uint64          unknown_1;
+    uint64          unknown_2;
+
+    BDAEBoneNewData  unknown[mesh_skins_data.mesh_skin_data[i].unknown_count_2]  <bgcolor=0x0000FF, name="Bone">;
+};
+
+struct EXTRA
+{
+    float unknown_1;
+    int unknown_2;
+};
+
+struct BDAEBoneData2
+{
+    local int i, j, k;
+
+    for (i = 0; i < model_info.mesh_skins_info.mesh_skin_count; i++)
+    {
+        FSeek(mesh_skins_data.mesh_skin_data[i].unknown_data_2_offset);
+        BDAEBoneUnknown  mesh_bone_UNKNOWN  <name="Mesh Skin">;
+    }
+
+    for (i = 0; i < model_info.mesh_skins_info.mesh_skin_count; i++)
+    {
+        for (j = 0; j < mesh_skins_data.mesh_skin_data[i].bone_count ; j++)
+        {
+            FSeek(mesh_bone_UNKNOWN.unknown[j].unknown_offset);
+
+            for (k = 0; k < mesh_bone_UNKNOWN.unknown[j].unknown_count; k++)
+                EXTRA unknown;
+        }
+    }
+}; */
+
+
+// BDAE FILE STRUCTURE
+// ___________________
+
+struct BDAEFile
+{
+    FSeek(0);
+    BDAEHeader                header              <                              name="BDAE Header">;
+    FSeek(header.offset_table_offset);
+    BDAEOffsets               offsets             <                              name="BDAE Offset Table">;
+    FSeek(header.string_table_offset);
+    BDAEStrings               strings             <                              name="BDAE String Table">;
+    FSeek(header.model_info_section_offset);
+    BDAEModelInfo             model_info          <                              name="BDAE Model Info">;
+    FSeek(model_info.textures_info.real_texture_metadata_offset);
+    BDAETexturesMetadata      textures            <                              name="BDAE Textures Metadata">;
+    FSeek(model_info.materials_info.real_material_metadata_offset);
+    BDAEMaterialsMetadata     materials           <                              name="BDAE Materials Metadata">;
+    BDAEMaterialsData         materials_data      <                              name="BDAE Materials Data">;
+    FSeek(model_info.meshes_info.real_mesh_metadata_offset);
+    BDAEMeshesMetadata        meshes              <                              name="BDAE Meshes Metadata">;
+    BDAEMeshesData            meshes_data         <                              name="BDAE Meshes Data">;
+    FSeek(model_info.mesh_skins_info.real_mesh_skin_metadata_offset);
+    BDAEMeshSkinsMetadata     mesh_skins          <                              name="BDAE Mesh Skins Metadata">;
+    BDAEMeshSkinsData         mesh_skins_data     <                              name="BDAE Mesh Skins Data">;
+    FSeek(model_info.node_trees_info.real_node_tree_metadata_offset);
+    BDAENodeTreesMetadata     node_trees          <                              name="BDAE Node Trees Metadata">;
+    BDAENodeTreesData         node_trees_data     <                              name="BDAE Node Trees Data">;
+    FSeek(header.model_data_section_offset);
+    BDAERemovableChunks       removable_chunks    <                              name="BDAE Removable Chunks Metadata">;
+    BDAEVertexData            vertex_data         <                              name="BDAE Vertex Data">;
+    FSeek(mesh_skins_data.mesh_skin_data[0].skinned_vertex_data_offset);
+    BDAEBonesData             bones_data          <                              name="BDAE Bones Data">;
+    // FSeek(mesh_skins_data.mesh_skin_data[0].unknown_data_2_offset);
+    // BDAEBoneData2             bone_data_2         <                              name="BDAE Bone Data 2">;
+} file <name="BDAE File">;

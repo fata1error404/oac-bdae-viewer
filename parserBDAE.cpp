@@ -1,11 +1,8 @@
-#include <algorithm>
-#include <filesystem>
-#include <cmath>
-#include "PackPatchReader.h"
 #include "model.h"
+#include "PackPatchReader.h"
 #include "libs/stb_image.h"
 
-//! Parses .bdae file: textures, materials, meshes, mesh skin (if exist), and node tree.
+//! Parses .bdae model file: textures, materials, meshes, mesh skin (if exist), and node tree.
 int Model::init(IReadResFile *file)
 {
 	LOG("\033[1m\033[38;2;200;200;200m[Init] Starting Model::init..\033[0m\n");
@@ -176,7 +173,7 @@ int Model::init(IReadResFile *file)
 	std::vector<int> submeshTriangleCount[meshCount];
 	std::vector<int> submeshIndexDataOffset[meshCount];
 
-	std::vector<std::string> meshName(meshCount);
+	std::vector<std::string> meshNames(meshCount);
 
 	for (int i = 0; i < meshCount; i++)
 	{
@@ -203,9 +200,9 @@ int Model::init(IReadResFile *file)
 		memcpy(&meshVertexDataOffset[i], DataBuffer + header->offsetData + 120 + 4 + meshMetadataOffset + 20 + i * 24 + meshDataOffset + 88, sizeof(int));
 #endif
 		memcpy(&nameLength, DataBuffer + nameOffset - 4, sizeof(int));
-		meshName[i] = std::string(DataBuffer + nameOffset, nameLength);
+		meshNames[i] = std::string(DataBuffer + nameOffset, nameLength);
 
-		LOG("[", i + 1, "] \033[96m", meshName[i], "\033[0m  ", submeshCount[i], " submeshes, ", meshVertexCount[i], " vertices - ", bytesPerVertex[i], " bytes / vertex");
+		LOG("[", i + 1, "] \033[96m", meshNames[i], "\033[0m  ", submeshCount[i], " submeshes, ", meshVertexCount[i], " vertices - ", bytesPerVertex[i], " bytes / vertex");
 
 		for (int k = 0; k < submeshCount[i]; k++)
 		{
@@ -281,11 +278,11 @@ int Model::init(IReadResFile *file)
 	{
 		Node &node = nodes[i];
 
-		auto it = std::find(std::begin(meshName), std::end(meshName), node.mainName);
+		auto it = std::find(std::begin(meshNames), std::end(meshNames), node.mainName);
 
-		if (it != meshName.end())
+		if (it != meshNames.end())
 		{
-			int meshIndex = std::distance(meshName.begin(), it);
+			int meshIndex = std::distance(meshNames.begin(), it);
 			meshToNodeIdx[meshIndex] = i;
 			node2meshCount++;
 
@@ -337,25 +334,21 @@ int Model::init(IReadResFile *file)
 
 	for (int i = 0; i < meshCount; i++)
 	{
-		int vertexBase = (int)(vertices.size() / 8); // [FIX] to convert vertex indices from local to global range
+		int vertexBase = vertices.size(); // [FIX] to convert vertex indices from local to global range
 
 		char *meshVertexDataPtr = DataBuffer + meshVertexDataOffset[i] + 4;
 
 		for (int j = 0; j < meshVertexCount[i]; j++)
 		{
-			float vertex[8]; // each vertex has 3 position, 3 normal, and 2 texture coordinates (total of 8 float components; in fact, in the .bdae file there are more than 8 variables per vertex, that's why bytesPerVertex is more than 8 * sizeof(float))
-			memcpy(vertex, meshVertexDataPtr + j * bytesPerVertex[i], sizeof(vertex));
+			float tmp[8];
+			memcpy(tmp, meshVertexDataPtr + j * bytesPerVertex[i], sizeof(tmp));
 
-			vertices.push_back(vertex[0]); // X
-			vertices.push_back(vertex[1]); // Y
-			vertices.push_back(vertex[2]); // Z
+			Vertex vertex;
+			vertex.PosCoords = glm::vec3(tmp[0], tmp[1], tmp[2]);
+			vertex.Normal = glm::vec3(tmp[3], tmp[4], tmp[5]);
+			vertex.TexCoords = glm::vec2(tmp[6], tmp[7]);
 
-			vertices.push_back(vertex[3]); // Nx
-			vertices.push_back(vertex[4]); // Ny
-			vertices.push_back(vertex[5]); // Nz
-
-			vertices.push_back(vertex[6]); // U
-			vertices.push_back(vertex[7]); // V
+			vertices.push_back(vertex);
 		}
 
 		for (int k = 0; k < submeshCount[i]; k++)
@@ -377,7 +370,7 @@ int Model::init(IReadResFile *file)
 		}
 	}
 
-	vertexCount = vertices.size() / 8;
+	vertexCount = vertices.size();
 
 	// 8. parse BONES and match bones with nodes
 	// bone is a "job" given to a node in animated models, allowing it to influence specific vertices rather than the entire mesh; bones form the model’s skeleton, while the influenced (or “skinned”) vertices act as the model’s skin
@@ -428,6 +421,7 @@ int Model::init(IReadResFile *file)
 		{
 			boneNames.resize(boneCount);
 			bindPoseMatrices.resize(boneCount);
+			boneTotalTransforms.resize(boneCount);
 
 			for (int i = 0; i < boneCount; i++)
 			{
@@ -468,21 +462,19 @@ int Model::init(IReadResFile *file)
 			}
 		}
 
-		boneInfluences.resize(vertexCount * 4); // the actual size of this vector should be boneInfluenceFloatCount, but we resize to 4 influence pairs (bone index, bone weight) per vertex for convenience: to further create a fixed-size buffer that aligns with the GPU's expectation, which simplifies shader logic
-
 		// loop through each vertex (because boneInfluenceFloatCount / (maxInfluence + 1) = vertexCount)
 		for (int i = 0; i < boneInfluenceFloatCount / (maxInfluence + 1); i++)
 		{
-			char boneIndices[4] = {0};				  // the number of bone indices is always 4 (effectively only maxInfluence indices are stored, and the remaining elements are reserved to align to 4 bytes)
-			float boneWeights[maxInfluence] = {0.0f}; // the number of bone weights equals maxInfluence
+			char indices[4] = {0};				  // the number of bone indices is always 4 (effectively only maxInfluence indices are stored, and the remaining elements are reserved to align to 4 bytes)
+			float weights[maxInfluence] = {0.0f}; // the number of bone weights equals maxInfluence
 
-			memcpy(boneIndices, DataBuffer + boneInfluenceDataOffset + 4 + i * (maxInfluence + 1) * 4, 4);
-			memcpy(boneWeights, DataBuffer + boneInfluenceDataOffset + 4 + i * (maxInfluence + 1) * 4 + 4, maxInfluence * sizeof(float));
+			memcpy(indices, DataBuffer + boneInfluenceDataOffset + 4 + i * (maxInfluence + 1) * 4, 4);
+			memcpy(weights, DataBuffer + boneInfluenceDataOffset + 4 + i * (maxInfluence + 1) * 4 + 4, maxInfluence * sizeof(float));
 
 			for (int j = 0; j < maxInfluence; j++)
 			{
-				boneInfluences[i * 4 + j].first = boneIndices[j];
-				boneInfluences[i * 4 + j].second = boneWeights[j];
+				vertices[i].BoneIndices[j] = indices[j];
+				vertices[i].BoneWeights[j] = weights[j];
 			}
 		}
 	}
@@ -549,6 +541,8 @@ void Model::parseNodesRecursive(int nodeOffset, int parentIndex)
 	node.defaultRotation = node.localRotation;
 	node.defaultScale = node.localScale;
 
+	node.pivotTransform = glm::mat4(1.0f);
+
 	nodes.push_back(node);
 
 	int nodeIndex = nodes.size() - 1; // this new node is the last element in the node list
@@ -579,7 +573,7 @@ void Model::updateNodesTransformationsRecursive(int nodeIndex, const glm::mat4 &
 {
 	Node &currNode = nodes[nodeIndex];
 
-	// translate -> rotate -> scale
+	// scale -> rotate -> translate
 	glm::mat4 localTransform(1.0f);
 	localTransform = glm::translate(glm::mat4(1.0f), currNode.localTranslation);
 	localTransform *= glm::mat4_cast(currNode.localRotation);
@@ -660,7 +654,7 @@ void Model::printNodesRecursive(int nodeIndex, const std::string &prefix, bool i
 		printNodesRecursive(children[i], prefix + (isLastChild ? "    " : "│   "), (i + 1 == children.size()));
 }
 
-//! Loads .bdae file from disk, calls the parser and searches for alternative textures and sounds.
+//! Loads .bdae model file from disk, calls init function and searches for animations, sounds, and alternative colors.
 void Model::load(const char *fpath, Sound &sound, bool isTerrainViewer)
 {
 	reset();
@@ -686,7 +680,8 @@ void Model::load(const char *fpath, Sound &sound, bool isTerrainViewer)
 
 	LOG("\033[1m\033[97mLoading ", fpath, "\033[0m");
 
-	std::string modelPath(fpath);
+	std::filesystem::path path(fpath);
+	std::string modelPath = path.string();
 	std::replace(modelPath.begin(), modelPath.end(), '\\', '/');	// normalize model path for cross-platform compatibility (Windows uses '\', Linux uses '/')
 	fileName = modelPath.substr(modelPath.find_last_of("/\\") + 1); // file name is after the last path separator in the full path
 
@@ -704,26 +699,22 @@ void Model::load(const char *fpath, Sound &sound, bool isTerrainViewer)
 
 	if (!isTerrainViewer) // 3D model viewer
 	{
-		// compute the mesh's center in world space for its correct rotation (instead of always rotating around the origin (0, 0, 0))
-		meshCenter = glm::vec3(0.0f);
+		// compute the model's center in world space for its correct rotation (instead of always rotating around the origin (0, 0, 0))
+		modelCenter = glm::vec3(0.0f);
 
-		for (int i = 0, n = vertices.size() / 8; i < n; i++)
-		{
-			meshCenter.x += vertices[i * 8 + 0];
-			meshCenter.y += vertices[i * 8 + 1];
-			meshCenter.z += vertices[i * 8 + 2];
-		}
+		for (int i = 0, n = vertices.size(); i < n; i++)
+			modelCenter += vertices[i].PosCoords;
 
-		meshCenter /= (vertices.size() / 8);
+		modelCenter /= vertices.size();
 
 		// 3. process strings retrieved from .bdae
-		const char *subpathStart = std::strstr(modelPath.c_str(), "/model/") + 7; // subpath starts after '/model/' (texture and model files have the same subpath, e.g. 'creature/pet/')
-		const char *subpathEnd = std::strrchr(modelPath.c_str(), '/') + 1;		  // last '/' before the file name
-		std::string textureSubpath(subpathStart, subpathEnd);
+		const char *subDirStart = std::strstr(modelPath.c_str(), "/model/") + 7; // subpath starts after '/model/' (texture and model files have the same subpath, e.g. 'creature/pet/')
+		const char *subDirEnd = std::strrchr(modelPath.c_str(), '/') + 1;		 // last '/' before the file name
+		std::string textureSubDir(subDirStart, subDirEnd);
 
 		bool isUnsortedFolder = false; // for 'unsorted' folder
 
-		if (textureSubpath.rfind("unsorted/", 0) == 0)
+		if (textureSubDir.rfind("unsorted/", 0) == 0)
 			isUnsortedFolder = true;
 
 		// post-process retrieved texture names
@@ -752,13 +743,13 @@ void Model::load(const char *fpath, Sound &sound, bool isTerrainViewer)
 
 			// build final path
 			if (!isUnsortedFolder)
-				s = "data/texture/" + textureSubpath + s;
+				s = "data/texture/" + textureSubDir + s;
 			else
 				s = "data/texture/unsorted/" + s;
 		}
 
 		// if a texture file matching the model file name exists, override the parsed texture (for single-texture models only)
-		std::string s = "data/texture/" + textureSubpath + fileName;
+		std::string s = "data/texture/" + textureSubDir + fileName;
 		s.replace(s.length() - 5, 5, ".png");
 
 		if (textureCount == 1 && std::filesystem::exists(s))
@@ -774,11 +765,15 @@ void Model::load(const char *fpath, Sound &sound, bool isTerrainViewer)
 			textureCount++;
 		}
 
-		// 4. search for alternative color texture files
+		LOG("\033[37m[Load] Searching for animations, sounds, and alternative colors.\033[0m");
+
+		// 4. search for ALTERNATIVE COLOR texture files
+		// ____________________
+
 		// [TODO] handle for multi-texture models
 		if (textureNames.size() == 1 && std::filesystem::exists(textureNames[0]) && !isUnsortedFolder)
 		{
-			std::filesystem::path texturePath("data/texture/" + textureSubpath);
+			std::filesystem::path textureDir("data/texture/" + textureSubDir);
 			std::string baseTextureName = std::filesystem::path(textureNames[0]).stem().string(); // texture file name without extension or folder (e.g. 'boar_01' or 'puppy_bear_black')
 
 			std::string groupName; // name shared by a group of related textures
@@ -788,7 +783,7 @@ void Model::load(const char *fpath, Sound &sound, bool isTerrainViewer)
 				groupName = baseTextureName;
 
 			// naming rule #2
-			for (const std::filesystem::directory_entry &entry : std::filesystem::directory_iterator(texturePath))
+			for (const std::filesystem::directory_entry &entry : std::filesystem::directory_iterator(textureDir))
 			{
 				if (!entry.is_regular_file())
 					continue;
@@ -855,7 +850,7 @@ void Model::load(const char *fpath, Sound &sound, bool isTerrainViewer)
 						continue;
 
 					// loop through each file in the texture directory and count how many .png files start with '<pref>_'
-					for (const std::filesystem::directory_entry &entry : std::filesystem::directory_iterator(texturePath))
+					for (const std::filesystem::directory_entry &entry : std::filesystem::directory_iterator(textureDir))
 					{
 						if (!entry.is_regular_file())
 							continue;
@@ -883,7 +878,7 @@ void Model::load(const char *fpath, Sound &sound, bool isTerrainViewer)
 			{
 				std::vector<std::string> found;
 
-				for (const std::filesystem::directory_entry &entry : std::filesystem::directory_iterator(texturePath))
+				for (const std::filesystem::directory_entry &entry : std::filesystem::directory_iterator(textureDir))
 				{
 					if (!entry.is_regular_file())
 						continue;
@@ -897,7 +892,7 @@ void Model::load(const char *fpath, Sound &sound, bool isTerrainViewer)
 					if (!(entryPath.stem().string() == groupName || entryPath.stem().string().rfind(groupName + '_', 0) == 0))
 						continue;
 
-					std::string alternativeTextureName = "data/texture/" + textureSubpath + entryPath.filename().string();
+					std::string alternativeTextureName = "data/texture/" + textureSubDir + entryPath.filename().string();
 
 					// skip the original base texture (already in textureNames[0])
 					if (alternativeTextureName == textureNames[0])
@@ -928,7 +923,60 @@ void Model::load(const char *fpath, Sound &sound, bool isTerrainViewer)
 				LOG("No valid grouping name for '", baseTextureName, "'");
 		}
 
-		// 5. search for sounds
+		// 5. search for ANIMATIONS and load them (animations are stored in separate .bdae files, e.g. walk_forward.bdae)
+		// ____________________
+
+		std::string modelDir = path.parent_path().string(); // model folder path
+		std::string baseModelName = path.stem().string();	// model file name without extension or folder
+
+		std::string animDir;
+
+		if (isUnsortedFolder)
+			animDir = modelDir + "/anim"; // for unsorted models, look in 'anim' subfolder
+		else
+			animDir = modelDir + "/animations/" + baseModelName; // for sorted models, look in 'animations/model_name' folder
+
+		std::vector<std::string> animationFileNames; // [TODO] to remove; there should be a vector of loaded animations instead
+
+		// check if animation directory exists
+		if (std::filesystem::exists(animDir) && std::filesystem::is_directory(animDir))
+		{
+			std::vector<std::string> found;
+
+			// search for all .bdae files in the animation directory
+			for (const std::filesystem::directory_entry &entry : std::filesystem::directory_iterator(animDir))
+			{
+				if (!entry.is_regular_file())
+					continue;
+
+				std::filesystem::path entryPath = entry.path();
+
+				if (entryPath.extension() != ".bdae")
+					continue;
+
+				found.push_back(entryPath.string());
+				animationFileNames.push_back(entryPath.filename().string());
+			}
+
+			std::sort(found.begin(), found.end());
+			std::sort(animationFileNames.begin(), animationFileNames.end());
+
+			// load all found animation .bdae files
+			if (!found.empty())
+			{
+				for (int i = 0; i < found.size(); i++)
+					loadAnimation(found[i].c_str());
+			}
+		}
+
+		LOG("\nANIMATIONS: ", animationCount);
+
+		for (int i = 0; i < animations.size(); i++)
+			LOG("[", i + 1, "] \033[96m", animationFileNames[i], "\033[0m  ", std::fixed, std::setprecision(2), animations[i].first, " sec duration");
+
+		// 6. search for SOUNDS
+		// ____________________
+
 		sound.searchSoundFiles(fileName, sounds);
 
 		LOG("\nSOUNDS: ", ((sounds.size() != 0) ? sounds.size() : 0));
@@ -963,7 +1011,7 @@ void Model::load(const char *fpath, Sound &sound, bool isTerrainViewer)
 	delete bdaeFile;
 	delete bdaeArchive;
 
-	// 6. setup buffers
+	// 7. setup buffers
 	if (!isTerrainViewer)
 	{
 		LOG("\n\033[37m[Load] Uploading vertex data to GPU.\033[0m");
@@ -974,30 +1022,28 @@ void Model::load(const char *fpath, Sound &sound, bool isTerrainViewer)
 
 		glBindVertexArray(VAO); // bind the VAO first so that subsequent VBO bindings and vertex attribute configurations are stored in it correctly
 
-		glBindBuffer(GL_ARRAY_BUFFER, VBO);																 // bind the VBO
-		glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_STATIC_DRAW); // copy vertex data into the GPU buffer's memory
+		glBindBuffer(GL_ARRAY_BUFFER, VBO);																  // bind the VBO
+		glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_STATIC_DRAW); // copy vertex data into the GPU buffer's memory
 
-		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)0); // define the layout of the vertex data (vertex attribute configuration): index 0, 3 components per vertex, type float, not normalized, with a stride of 8 * sizeof(float) (next vertex starts after 8 floats), and an offset of 0 in the buffer
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void *)0); // define the layout of the vertex data (vertex attribute configuration): index 0, 3 components per vertex, type float, not normalized, with a stride of 52 bytes (sizeof(Vertex) = 12 floats + 4 chars = 52 bytes), and an offset of 0 in the buffer
 		glEnableVertexAttribArray(0);
-		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(3 * sizeof(float)));
+		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void *)(3 * sizeof(float)));
 		glEnableVertexAttribArray(1);
-		glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(6 * sizeof(float)));
+		glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void *)(6 * sizeof(float)));
 		glEnableVertexAttribArray(2);
+		glVertexAttribIPointer(3, 4, GL_UNSIGNED_BYTE, sizeof(Vertex), (void *)(8 * sizeof(float)));
+		glEnableVertexAttribArray(3);
+		glVertexAttribPointer(4, 4, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void *)(8 * sizeof(float) + 4 * sizeof(char)));
+		glEnableVertexAttribArray(4);
 
 		for (int i = 0; i < totalSubmeshCount; i++)
 		{
 			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBOs[i]);
 			glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices[i].size() * sizeof(unsigned short), indices[i].data(), GL_STATIC_DRAW);
 		}
-
-		// Update vertex buffer with bone data if skinning is present
-		updateVertexBufferWithBoneData();
-
-		// Automatically search and load all animation files
-		searchAnimationFiles(fpath, false); // isUnsortedFolder will be recalculated inside
 	}
 
-	// 7. load texture(s)
+	// 8. load texture(s)
 	LOG("\033[37m[Load] Uploading textures to GPU.\033[0m");
 
 	textures.resize(textureNames.size());
@@ -1030,525 +1076,272 @@ void Model::load(const char *fpath, Sound &sound, bool isTerrainViewer)
 		stbi_image_free(data);
 	}
 
-	// Generate unit sphere for node visualization
-	generateUnitSphere();
+	// 9. generate a unit icosahedron for node visualization (easier than sphere)
+
+	// icosahedron – 3D geometry with 20 triangular faces, 12 vertices, and 30 edges.
+	// Its vertices can be generated by all even permutations of the coordinates (±1, ±φ, 0), where φ = (1 + √5) / 2 is the golden ratio.
+
+	const float t = (1.0f + std::sqrt(5.0f)) / 2.0f; // golden ratio
+
+	// 12 vertices of icosahedron (normalize so that all points lie on the unit sphere
+	std::vector<glm::vec3> positions = {
+		glm::normalize(glm::vec3(-1, t, 0)),
+		glm::normalize(glm::vec3(1, t, 0)),
+		glm::normalize(glm::vec3(-1, -t, 0)),
+		glm::normalize(glm::vec3(1, -t, 0)),
+		glm::normalize(glm::vec3(0, -1, t)),
+		glm::normalize(glm::vec3(0, 1, t)),
+		glm::normalize(glm::vec3(0, -1, -t)),
+		glm::normalize(glm::vec3(0, 1, -t)),
+		glm::normalize(glm::vec3(t, 0, -1)),
+		glm::normalize(glm::vec3(t, 0, 1)),
+		glm::normalize(glm::vec3(-t, 0, -1)),
+		glm::normalize(glm::vec3(-t, 0, 1))};
+
+	std::vector<float> vertices;
+
+	for (int i = 0; i < positions.size(); i++)
+	{
+		vertices.push_back(positions[i].x);
+		vertices.push_back(positions[i].y);
+		vertices.push_back(positions[i].z);
+	}
+
+	// 20 faces (triangles) of icosahedron
+	std::vector<unsigned int> indices = {
+		0, 11, 5,
+		0, 5, 1,
+		0, 1, 7,
+		0, 7, 10,
+		0, 10, 11,
+
+		1, 5, 9,
+		5, 11, 4,
+		11, 10, 2,
+		10, 7, 6,
+		7, 1, 8,
+
+		3, 9, 4,
+		3, 4, 2,
+		3, 2, 6,
+		3, 6, 8,
+		3, 8, 9,
+
+		4, 9, 5,
+		2, 4, 11,
+		6, 2, 10,
+		8, 6, 7,
+		9, 8, 1};
+
+	glGenVertexArrays(1, &nodeVAO);
+	glGenBuffers(1, &nodeVBO);
+	glGenBuffers(1, &nodeEBO);
+
+	glBindVertexArray(nodeVAO);
+
+	glBindBuffer(GL_ARRAY_BUFFER, nodeVBO);
+	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_STATIC_DRAW);
+
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
+	glEnableVertexAttribArray(0);
+
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, nodeEBO);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), indices.data(), GL_STATIC_DRAW);
 
 	modelLoaded = true;
 	LOG("\033[1m\033[38;2;200;200;200m[Load] BDAE model loaded.\033[0m\n");
 }
 
-//! Recreates the vertex buffer to include bone IDs and weights.
-void Model::updateVertexBufferWithBoneData()
+//! Loads .bdae animation file from disk and parses animation samplers, channels, and data (timestamps and transformations).
+void Model::loadAnimation(const char *fpath)
 {
-	if (!hasSkinningData || boneInfluences.empty())
+	CPackPatchReader *bdaeArchive = new CPackPatchReader(fpath, true, false);
+
+	if (!bdaeArchive)
 		return;
 
-	LOG("\n\033[1m\033[96m[UpdateVBO] Updating vertex buffer with bone data...\033[0m");
+	IReadResFile *bdaeFile = bdaeArchive->openFile("little_endian_not_quantized.bdae");
 
-	int oldVertexCount = vertices.size() / 8;
-	int boneDataVertexCount = boneInfluences.size() / 4;
-
-	if (oldVertexCount != boneDataVertexCount)
+	if (!bdaeFile)
 	{
-		LOG("\033[31m[UpdateVBO] ERROR: Vertex count mismatch! (", oldVertexCount, " != ", boneDataVertexCount, ")\033[0m");
+		delete bdaeArchive;
 		return;
 	}
 
-	// Create new interleaved data: Pos(3), Normal(3), TexCoord(2), BoneIDs(4), BoneWeights(4)
-	std::vector<float> newVertexData;
-	newVertexData.reserve(oldVertexCount * 16);
+	int fileSize = bdaeFile->getSize();
+	int headerSize = sizeof(struct BDAEFileHeader);
+	struct BDAEFileHeader *header = new BDAEFileHeader;
+	bdaeFile->read(header, headerSize);
 
-	for (int i = 0; i < oldVertexCount; i++)
+	char *DataBuffer = (char *)malloc(fileSize);
+
+	memcpy(DataBuffer, header, headerSize);
+
+	bdaeFile->read(DataBuffer + headerSize, fileSize - headerSize);
+
+	// parse general animation info
+	// one animation entry is a base animation – rotation / scale / translation of one target node
+
+	int startTime, endTime;	 // in milliseconds
+	int animationEntryCount; // number of animated nodes * 3
+	int samplersAndChannelsMetadataOffset;
+	int animationMetadataOffset;
+
+	memcpy(&startTime, DataBuffer + header->offsetData + 48, sizeof(int));
+	memcpy(&endTime, DataBuffer + header->offsetData + 52, sizeof(int));
+	memcpy(&animationEntryCount, DataBuffer + header->offsetData + 56, sizeof(int));
+	memcpy(&samplersAndChannelsMetadataOffset, DataBuffer + header->offsetData + 60, sizeof(int));
+	memcpy(&animationMetadataOffset, DataBuffer + header->offsetData + 68, sizeof(int));
+
+	float duration = (endTime - startTime) / 1000.0f; // convert to seconds
+
+	std::vector<BaseAnimation> animation;
+	animation.resize(animationEntryCount);
+
+	// parse SAMPLERS and CHANNELS
+	// ____________________
+
+	// sampler tells "how to animate" – it defines how keyframes are used to generate animation over time, holding timestamps (= keyframe times = input sources), animation data (= transformations = output sources), and interpolation type (how values are blended between keyframes).
+	// channel tells "what to animate" – it connects a sampler to a specific target node of the .bdae model.
+
+	int samplerCount[animationEntryCount], samplerDataOffset[animationEntryCount];
+	int channelCount[animationEntryCount], channelDataOffset[animationEntryCount];
+
+	// [TODO] test on different models and find out if 1 animation entry can have > 1 sampler and channel and maybe change to a standard fixed-size array
+	std::vector<std::vector<int>> timestampDataIndex(animationEntryCount);
+	std::vector<std::vector<int>> transformationDataIndex(animationEntryCount);
+
+	for (int i = 0; i < animationEntryCount; i++)
 	{
-		// Copy old data (position, normal, texcoord)
-		newVertexData.insert(newVertexData.end(), vertices.begin() + i * 8, vertices.begin() + i * 8 + 8);
+		memcpy(&samplerCount[i], DataBuffer + header->offsetData + 60 + samplersAndChannelsMetadataOffset + 8 + i * 40, sizeof(int));
+		memcpy(&samplerDataOffset[i], DataBuffer + header->offsetData + 60 + samplersAndChannelsMetadataOffset + 12 + i * 40, sizeof(int));
+		memcpy(&channelCount[i], DataBuffer + header->offsetData + 60 + samplersAndChannelsMetadataOffset + 16 + i * 40, sizeof(int));
+		memcpy(&channelDataOffset[i], DataBuffer + header->offsetData + 60 + samplersAndChannelsMetadataOffset + 20 + i * 40, sizeof(int));
 
-		// Add bone data from the vector of pairs
-		for (int j = 0; j < 4; j++)
+		if (samplerCount[i] != 1)
 		{
-			const auto &influence = boneInfluences[i * 4 + j];
-			newVertexData.push_back(static_cast<float>(influence.first)); // boneID
+			LOG("[Error] Model::loadAnimation expected 1 sampler but animation entry [", i + 1, "] has: ", samplerCount[i]);
+			return;
 		}
-		for (int j = 0; j < 4; j++)
+
+		if (channelCount[i] != 1)
 		{
-			const auto &influence = boneInfluences[i * 4 + j];
-			newVertexData.push_back(influence.second); // weight
+			LOG("[Error] Model::loadAnimation expected 1 channel but animation entry [", i + 1, "] has: ", channelCount[i]);
+			return;
 		}
-	}
 
-	vertices = newVertexData;
-
-	// Re-upload data to GPU and update attribute pointers
-	glBindVertexArray(VAO);
-	glBindBuffer(GL_ARRAY_BUFFER, VBO);
-	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_STATIC_DRAW);
-
-	// New stride is 16 floats
-	const int stride = 16 * sizeof(float);
-	// Position
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, (void *)0);
-	glEnableVertexAttribArray(0);
-	// Normal
-	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, stride, (void *)(3 * sizeof(float)));
-	glEnableVertexAttribArray(1);
-	// TexCoord
-	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, stride, (void *)(6 * sizeof(float)));
-	glEnableVertexAttribArray(2);
-	// Bone IDs (as floats)
-	glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, stride, (void *)(8 * sizeof(float)));
-	glEnableVertexAttribArray(3);
-	// Bone Weights
-	glVertexAttribPointer(4, 4, GL_FLOAT, GL_FALSE, stride, (void *)(12 * sizeof(float)));
-	glEnableVertexAttribArray(4);
-
-	glBindVertexArray(0);
-
-	LOG("  \033[32m✓ Vertex buffer updated with skinning data. New stride: ", stride, " bytes.\033[0m");
-}
-
-// Animation functions to be added to parserBDAE.cpp
-
-//! Search for and load all animation files based on model path.
-void Model::searchAnimationFiles(const char *modelPath, bool isUnsortedFolder)
-{
-	std::string modelPathStr(modelPath);
-	std::replace(modelPathStr.begin(), modelPathStr.end(), '\\', '/');
-
-	// Detect if this is an unsorted folder model
-	bool isUnsorted = (modelPathStr.find("/model/unsorted/") != std::string::npos);
-
-	// Get the directory containing the model
-	size_t lastSlash = modelPathStr.find_last_of('/');
-	if (lastSlash == std::string::npos)
-		return;
-
-	std::string modelDir = modelPathStr.substr(0, lastSlash);
-
-	// Get model name without extension
-	std::string modelFileName = modelPathStr.substr(lastSlash + 1);
-	size_t dotPos = modelFileName.rfind(".bdae");
-	if (dotPos == std::string::npos)
-		return;
-
-	std::string modelName = modelFileName.substr(0, dotPos);
-
-	std::string animDir;
-
-	if (isUnsorted)
-	{
-		// For unsorted models, look in "anim" subfolder
-		animDir = modelDir + "/anim";
-	}
-	else
-	{
-		// For regular models, look in "animations/model_name" folder
-		animDir = modelDir + "/animations/" + modelName;
-	}
-
-	LOG("\n\033[37m[Load] Searching for animations in: ", animDir, "\033[0m");
-	LOG("\033[37m[Load] Model path: ", modelPathStr, "\033[0m");
-	LOG("\033[37m[Load] Is unsorted: ", (isUnsorted ? "YES" : "NO"), "\033[0m");
-
-	// Check if animation directory exists
-	if (!std::filesystem::exists(animDir) || !std::filesystem::is_directory(animDir))
-	{
-		LOG("\033[37m[Load] Animation directory not found: ", animDir, "\033[0m");
-		return;
-	}
-
-	// Search for all .bdae files in the animation directory
-	std::vector<std::string> animationFiles;
-
-	for (const auto &entry : std::filesystem::directory_iterator(animDir))
-	{
-		if (entry.is_regular_file())
+		for (int j = 0; j < samplerCount[i]; j++)
 		{
-			std::string filePath = entry.path().string();
-			if (filePath.size() >= 5 && filePath.substr(filePath.size() - 5) == ".bdae")
+			int interpolationType;
+			int timestampValueDataType, transformationValueDataType;
+			int timestampArrayID, transformationArrayID; // indices into the animation data array
+
+			memcpy(&animation[i].interpolationType, DataBuffer + header->offsetData + 60 + samplersAndChannelsMetadataOffset + 12 + i * 40 + samplerDataOffset[i] + j * 32, sizeof(int));
+			memcpy(&timestampValueDataType, DataBuffer + header->offsetData + 60 + samplersAndChannelsMetadataOffset + 12 + i * 40 + samplerDataOffset[i] + 4 + j * 32, sizeof(int));
+			memcpy(&timestampArrayID, DataBuffer + header->offsetData + 60 + samplersAndChannelsMetadataOffset + 12 + i * 40 + samplerDataOffset[i] + 12 + j * 32, sizeof(int));
+			memcpy(&transformationValueDataType, DataBuffer + header->offsetData + 60 + samplersAndChannelsMetadataOffset + 12 + i * 40 + samplerDataOffset[i] + 16 + j * 32, sizeof(int));
+			memcpy(&transformationArrayID, DataBuffer + header->offsetData + 60 + samplersAndChannelsMetadataOffset + 12 + i * 40 + samplerDataOffset[i] + 24 + j * 32, sizeof(int));
+
+			if (timestampValueDataType != 1)
 			{
-				animationFiles.push_back(filePath);
+				LOG("[Error] Model::loadAnimation unhandled timestamp value data type (expected unsigned byte = 1):", timestampValueDataType);
+				return;
 			}
+
+			if (transformationValueDataType != 6)
+			{
+				LOG("[Error] Model::loadAnimation unhandled transformation value data type (expected float = 6):", transformationValueDataType);
+				return;
+			}
+
+			animation[i].interpolationType = interpolationType;
+			timestampDataIndex[i].push_back(timestampArrayID);
+			transformationDataIndex[i].push_back(transformationArrayID);
+		}
+
+		for (int j = 0; j < channelCount[i]; j++)
+		{
+			BDAEint targetNodeNameOffset;
+			int targetNodeNameLength, channelType;
+
+			memcpy(&targetNodeNameOffset, DataBuffer + header->offsetData + 60 + samplersAndChannelsMetadataOffset + 20 + i * 40 + channelDataOffset[i] + j * 24, sizeof(BDAEint));
+			memcpy(&targetNodeNameLength, DataBuffer + targetNodeNameOffset - 4, sizeof(int));
+			memcpy(&channelType, DataBuffer + header->offsetData + 60 + samplersAndChannelsMetadataOffset + 20 + i * 40 + channelDataOffset[i] + 8 + j * 24, sizeof(int));
+
+			animation[i].targetNodeName = std::string(DataBuffer + targetNodeNameOffset, targetNodeNameLength);
+			animation[i].animationType = channelType;
 		}
 	}
 
-	if (animationFiles.empty())
+	// parse BASE ANIMATIONS data
+	// ____________________
+
+	// normally, the layout of animation data is as follows: set of timestamps for animation entry[0] --> set of transformations for animation entry[0] --> .. [1] --> ..
+	// one element in this chain, either a set of timestamps (input source data) or a set of transformations (output source data), is called "source entry"
+	// we assume that all timestamps are stored as unsigned bytes, and transformations as either 3 or 4 floats, depending on the corresponding channel animation type
+
+	int sourceEntryCount; // animation entry count * 2
+
+	memcpy(&sourceEntryCount, DataBuffer + header->offsetData + 68 + animationMetadataOffset + 32, sizeof(int));
+
+	int animationValueCount[sourceEntryCount], animationDataOffset[sourceEntryCount];
+
+	for (int i = 0; i < sourceEntryCount; i++)
 	{
-		LOG("\033[37m[Load] No animation files found.\033[0m");
-		return;
+		memcpy(&animationValueCount[i], DataBuffer + header->offsetData + 68 + animationMetadataOffset + 36 + i * 8, sizeof(int));
+		memcpy(&animationDataOffset[i], DataBuffer + header->offsetData + 68 + animationMetadataOffset + 36 + 4 + i * 8, sizeof(int));
 	}
 
-	// Sort animation files for consistent ordering
-	std::sort(animationFiles.begin(), animationFiles.end());
-
-	LOG("\033[37m[Load] Found ", animationFiles.size(), " animation file(s).\033[0m");
-
-	// Load all animation files
-	for (const std::string &animFile : animationFiles)
+	for (int i = 0; i < animationEntryCount; i++)
 	{
-		animationFileNames.push_back(animFile);
-		loadAnimations(animFile.c_str());
-	}
+		int timestampValueCount = animationValueCount[timestampDataIndex[i][0]]; // we don't iterate over each animation entry's sampler, assuming there is exactly 1
 
-	animationCount = (int)animationFiles.size();
-
-	if (animationCount > 0)
-	{
-		selectedAnimation = 0; // Select first animation by default
-	}
-}
-
-//! Load animations from a separate .bdae animation file.
-void Model::loadAnimations(const char *animationFilePath)
-{
-	LOG("\n\033[1m\033[97mLoading animations from ", animationFilePath, "\033[0m");
-
-	// Create temporary vectors for this animation file
-	std::vector<Animation> currentAnimations;
-	std::vector<KeyframeSource> currentKeyframeSources;
-
-	// Open animation file
-	CPackPatchReader *animArchive = new CPackPatchReader(animationFilePath, true, false);
-	if (!animArchive)
-	{
-		LOG("[Error] Failed to open animation archive");
-		return;
-	}
-
-	IReadResFile *animFile = animArchive->openFile("little_endian_not_quantized.bdae");
-	if (!animFile)
-	{
-		LOG("[Error] Failed to open animation file inside archive");
-		delete animArchive;
-		return;
-	}
-
-	// Read header
-	BDAEFileHeader header;
-	animFile->read(&header, sizeof(header));
-
-	// Read entire file into buffer
-	int animFileSize = animFile->getSize();
-	char *animBuffer = (char *)malloc(animFileSize);
-	animFile->seek(0);
-	animFile->read(animBuffer, animFileSize);
-
-	// Helper function to read string at offset
-	auto readString = [&](uint32_t offset) -> std::string
-	{
-		if (offset < 4 || offset >= animFileSize)
-			return "";
-		int length;
-		memcpy(&length, animBuffer + offset - 4, sizeof(int));
-		if (length <= 0 || length > 200)
-			return "";
-		return std::string(animBuffer + offset, length);
-	};
-
-	// Helper function to parse source data
-	auto parseSourceData = [&](BDAEint sourceOffset, DataType dataType, int elementCount) -> std::vector<float>
-	{
-		std::vector<float> result;
-		if (sourceOffset >= animFileSize)
-			return result;
-
-		for (int i = 0; i < elementCount; i++)
+		for (int j = 0; j < timestampValueCount; j++)
 		{
-			float value = 0.0f;
-			switch (dataType)
+			unsigned char frameNumber;
+			memcpy(&frameNumber, DataBuffer + header->offsetData + 68 + animationMetadataOffset + 36 + 4 + i * 8 * 2 + animationDataOffset[timestampDataIndex[i][0]] + j, sizeof(unsigned char));
+			animation[i].timestamps.push_back(frameNumber / 30.0f); // convert to seconds (.bdae animations are authored to be played at 30 FPS)
+		}
+
+		int transformationValueCount = animationValueCount[transformationDataIndex[i][0]];
+
+		for (int j = 0; j < transformationValueCount; j++)
+		{
+			std::vector<float> frameTransformation;
+
+			switch (animation[i].animationType)
 			{
-			case DataType::BYTE:
-			{
-				int8_t val;
-				memcpy(&val, animBuffer + sourceOffset + i * 1, 1);
-				value = (float)val;
+			case 1: // translation --> X Y Z
+				frameTransformation.resize(3);
+				break;
+			case 5: // rotation --> X Y Z W
+				frameTransformation.resize(4);
+				break;
+			case 10: // scale --> X Y Z
+				frameTransformation.resize(3);
+				break;
+			default:
+				LOG("[Warning] Model::loadAnimation unknown animation type: ", animation[i].animationType);
 				break;
 			}
-			case DataType::UBYTE:
-			{
-				uint8_t val;
-				memcpy(&val, animBuffer + sourceOffset + i * 1, 1);
-				value = (float)val;
-				break;
-			}
-			case DataType::SHORT:
-			{
-				int16_t val;
-				memcpy(&val, animBuffer + sourceOffset + i * 2, 2);
-				value = (float)val;
-				break;
-			}
-			case DataType::USHORT:
-			{
-				uint16_t val;
-				memcpy(&val, animBuffer + sourceOffset + i * 2, 2);
-				value = (float)val;
-				break;
-			}
-			case DataType::INT:
-			{
-				int32_t val;
-				memcpy(&val, animBuffer + sourceOffset + i * 4, 4);
-				value = (float)val;
-				break;
-			}
-			case DataType::UINT:
-			{
-				uint32_t val;
-				memcpy(&val, animBuffer + sourceOffset + i * 4, 4);
-				value = (float)val;
-				break;
-			}
-			case DataType::FLOAT:
-			{
-				memcpy(&value, animBuffer + sourceOffset + i * 4, 4);
-				break;
-			}
-			}
-			result.push_back(value);
-		}
-		return result;
-	};
 
-	// Find SLibraryAnimations (at offsetData + 56)
-	BDAEint libAnimOffset = header.offsetData + 56;
-	uint32_t animCount, animOffsetRel;
-	memcpy(&animCount, animBuffer + libAnimOffset, sizeof(uint32_t));
-	memcpy(&animOffsetRel, animBuffer + libAnimOffset + 4, sizeof(uint32_t));
+			int componentCount = frameTransformation.size();
 
-	BDAEint animArrayOffset = libAnimOffset + 4 + animOffsetRel;
+			for (int k = 0; k < componentCount; k++)
+				memcpy(&frameTransformation[k], DataBuffer + header->offsetData + 68 + animationMetadataOffset + 36 + 12 + i * 8 * 2 + animationDataOffset[transformationDataIndex[i][0]] + j * componentCount * 4 + k * 4, sizeof(float));
 
-	LOG("Animation count: ", animCount);
-
-	// Find SAnimationData (sources array) - search for size field = animCount * 2
-	BDAEint sourcesOffset = 0;
-	uint32_t expectedSourcesCount = animCount * 2;
-
-	for (BDAEint pos = header.offsetData; pos < animFileSize - 8; pos++)
-	{
-		uint32_t count;
-		memcpy(&count, animBuffer + pos, sizeof(uint32_t));
-		if (count == expectedSourcesCount)
-		{
-			sourcesOffset = pos;
-			break;
+			animation[i].transformations.push_back(frameTransformation);
 		}
 	}
 
-	if (sourcesOffset == 0)
-	{
-		LOG("[Warning] Could not find SAnimationData structure");
-		free(animBuffer);
-		delete animFile;
-		delete animArchive;
-		return;
-	}
+	animations.push_back({duration, animation});
 
-	LOG("Found SAnimationData at offset: 0x", std::hex, sourcesOffset, std::dec);
+	free(DataBuffer);
 
-	// Parse sources array
-	uint32_t sourcesCount;
-	memcpy(&sourcesCount, animBuffer + sourcesOffset, sizeof(uint32_t));
-	BDAEint sourcesArrayOffset = sourcesOffset + 4;
+	delete header;
+	delete bdaeFile;
+	delete bdaeArchive;
 
-	LOG("Sources count: ", sourcesCount);
-
-	// Read source descriptors
-	struct SourceDesc
-	{
-		uint32_t count;
-		BDAEint dataOffset;
-	};
-
-	std::vector<SourceDesc> sourceDescs;
-	for (uint32_t i = 0; i < sourcesCount; i++)
-	{
-		BDAEint descPos = sourcesArrayOffset + i * 8;
-		SourceDesc desc;
-		uint32_t offsetRel;
-		memcpy(&desc.count, animBuffer + descPos, sizeof(uint32_t));
-		memcpy(&offsetRel, animBuffer + descPos + 4, sizeof(uint32_t));
-		desc.dataOffset = descPos + 4 + offsetRel;
-		sourceDescs.push_back(desc);
-	}
-
-	// Parse each animation
-	const int ANIM_STRUCT_SIZE = 40;
-
-	for (uint32_t animIndex = 0; animIndex < animCount; animIndex++)
-	{
-		BDAEint animPos = animArrayOffset + animIndex * ANIM_STRUCT_SIZE;
-
-		// Read SAnimation structure
-		uint32_t idOffset, idPadding;
-		uint32_t samplersCount, samplersOffsetRel;
-		uint32_t channelsCount, channelsOffsetRel;
-
-		memcpy(&idOffset, animBuffer + animPos, sizeof(uint32_t));
-		memcpy(&idPadding, animBuffer + animPos + 4, sizeof(uint32_t));
-
-		BDAEint samplersBase = animPos + 8;
-		memcpy(&samplersCount, animBuffer + samplersBase, sizeof(uint32_t));
-		memcpy(&samplersOffsetRel, animBuffer + samplersBase + 4, sizeof(uint32_t));
-		BDAEint samplersOffset = samplersBase + 4 + samplersOffsetRel;
-
-		BDAEint channelsBase = animPos + 16;
-		memcpy(&channelsCount, animBuffer + channelsBase, sizeof(uint32_t));
-		memcpy(&channelsOffsetRel, animBuffer + channelsBase + 4, sizeof(uint32_t));
-		BDAEint channelsOffset = channelsBase + 4 + channelsOffsetRel;
-
-		std::string animName = readString(idOffset);
-
-		Animation anim;
-		anim.name = animName;
-		anim.duration = 0.0f;
-
-		LOG("\n[", animIndex, "] ", animName);
-		LOG("  Samplers: ", samplersCount);
-		LOG("  Channels: ", channelsCount);
-
-		// Parse samplers
-		for (uint32_t s = 0; s < samplersCount; s++)
-		{
-			BDAEint samplerPos = samplersOffset + s * 28;
-
-			AnimationSampler sampler;
-			int32_t interp, inType, inComp, inSrc, outType, outComp, outSrc;
-
-			memcpy(&interp, animBuffer + samplerPos, sizeof(int32_t));
-			memcpy(&inType, animBuffer + samplerPos + 4, sizeof(int32_t));
-			memcpy(&inComp, animBuffer + samplerPos + 8, sizeof(int32_t));
-			memcpy(&inSrc, animBuffer + samplerPos + 12, sizeof(int32_t));
-			memcpy(&outType, animBuffer + samplerPos + 16, sizeof(int32_t));
-			memcpy(&outComp, animBuffer + samplerPos + 20, sizeof(int32_t));
-			memcpy(&outSrc, animBuffer + samplerPos + 24, sizeof(int32_t));
-
-			sampler.interpolation = (InterpolationType)interp;
-			sampler.inputSourceIndex = inSrc;
-			sampler.outputSourceIndex = outSrc;
-			sampler.inputType = (DataType)inType;
-			sampler.inputComponentCount = inComp;
-			sampler.outputType = (DataType)outType;
-			sampler.outputComponentCount = outComp;
-
-			// Parse keyframe source data if not already parsed
-			if (inSrc >= 0 && inSrc < (int)sourcesCount)
-			{
-				// Ensure currentKeyframeSources has enough space
-				while ((int)currentKeyframeSources.size() <= inSrc)
-				{
-					currentKeyframeSources.push_back(KeyframeSource());
-				}
-
-				// The number of timestamps must equal the number of keyframes in the output data.
-				int requiredTimeCount = sourceDescs[outSrc].count / sampler.outputComponentCount;
-
-				// Re-parse if the cached source is empty or has the wrong count for this specific track.
-				if (currentKeyframeSources[inSrc].data.empty() || currentKeyframeSources[inSrc].data.size() != requiredTimeCount)
-				{
-					currentKeyframeSources[inSrc].dataType = (DataType)inType;
-					currentKeyframeSources[inSrc].componentCount = inComp;
-					currentKeyframeSources[inSrc].data = parseSourceData(sourceDescs[inSrc].dataOffset, (DataType)inType, requiredTimeCount);
-
-					// Convert time values from frames to seconds (BDAE uses 30 fps)
-					// Time values in BDAE are stored as frame numbers, need to divide by 30
-					const float BDAE_FPS = 30.0f;
-					for (float &timeValue : currentKeyframeSources[inSrc].data)
-					{
-						timeValue /= BDAE_FPS;
-					}
-
-					// Update animation duration from time values
-					if (!currentKeyframeSources[inSrc].data.empty())
-					{
-						float maxTime = *std::max_element(currentKeyframeSources[inSrc].data.begin(), currentKeyframeSources[inSrc].data.end());
-						if (maxTime > anim.duration)
-							anim.duration = maxTime;
-					}
-				}
-			}
-
-			if (outSrc >= 0 && outSrc < (int)sourcesCount)
-			{
-				while ((int)currentKeyframeSources.size() <= outSrc)
-				{
-					currentKeyframeSources.push_back(KeyframeSource());
-				}
-
-				if (currentKeyframeSources[outSrc].data.empty())
-				{
-					currentKeyframeSources[outSrc].dataType = (DataType)outType;
-					currentKeyframeSources[outSrc].componentCount = outComp;
-					currentKeyframeSources[outSrc].data = parseSourceData(sourceDescs[outSrc].dataOffset, (DataType)outType, sourceDescs[outSrc].count);
-				}
-			}
-
-			anim.samplers.push_back(sampler);
-		}
-
-		// Parse channels
-		for (uint32_t c = 0; c < channelsCount; c++)
-		{
-			BDAEint channelPos = channelsOffset + c * 24;
-
-			AnimationChannel channel;
-			uint32_t sourceOffset, sourcePadding, channelType, typePadding, reserved1, reserved2;
-
-			memcpy(&sourceOffset, animBuffer + channelPos, sizeof(uint32_t));
-			memcpy(&sourcePadding, animBuffer + channelPos + 4, sizeof(uint32_t));
-			memcpy(&channelType, animBuffer + channelPos + 8, sizeof(uint32_t));
-			memcpy(&typePadding, animBuffer + channelPos + 12, sizeof(uint32_t));
-			memcpy(&reserved1, animBuffer + channelPos + 16, sizeof(uint32_t));
-			memcpy(&reserved2, animBuffer + channelPos + 20, sizeof(uint32_t));
-
-			channel.targetNodeName = readString(sourceOffset);
-			channel.channelType = (ChannelType)channelType;
-			channel.samplerIndex = c; // Channels and samplers are paired by index
-
-			anim.channels.push_back(channel);
-		}
-
-		// DEBUG: Show ALL keyframe times for Bone022-translation
-		if (anim.name.find("Bone022-node-translation") != std::string::npos ||
-			anim.name.find("Bone22-node-translation") != std::string::npos)
-		{
-			LOG("\n  ========== DEBUG: ", anim.name, " ==========");
-			if (!anim.samplers.empty() && anim.samplers[0].inputSourceIndex >= 0 &&
-				anim.samplers[0].inputSourceIndex < (int)currentKeyframeSources.size())
-			{
-				const auto &timeData = currentKeyframeSources[anim.samplers[0].inputSourceIndex].data;
-				const auto &valueData = currentKeyframeSources[anim.samplers[0].outputSourceIndex].data;
-				LOG("  Input source index: ", anim.samplers[0].inputSourceIndex);
-				LOG("  Output source index: ", anim.samplers[0].outputSourceIndex);
-				LOG("  Keyframe count: ", timeData.size());
-				LOG("  Value count: ", valueData.size());
-				LOG("  Output component count: ", anim.samplers[0].outputComponentCount);
-				LOG("  Actual keyframe count: ", valueData.size() / anim.samplers[0].outputComponentCount);
-				LOG("\n  ALL KEYFRAME TIMES:");
-				for (size_t i = 0; i < timeData.size(); i++)
-				{
-					size_t valueIndex = i * anim.samplers[0].outputComponentCount;
-					if (valueIndex + 2 < valueData.size())
-					{
-						LOG("    [", i, "] time=", timeData[i], "s  value=(",
-							valueData[valueIndex], ", ", valueData[valueIndex + 1], ", ", valueData[valueIndex + 2], ")");
-					}
-				}
-			}
-			LOG("  ==========================================\n");
-		}
-
-		currentAnimations.push_back(anim);
-		LOG("  Duration: ", anim.duration, " seconds");
-	}
-
-	free(animBuffer);
-	delete animFile;
-	delete animArchive;
-
-	// Add the loaded animations and keyframe sources to the sets
-	animationSets.push_back(currentAnimations);
-	keyframeSourceSets.push_back(currentKeyframeSources);
-
+	animationCount++;
 	animationsLoaded = true;
-	LOG("\n\033[1m\033[38;2;200;200;200m[Load] Loaded ", currentAnimations.size(), " animations.\033[0m\n");
 }

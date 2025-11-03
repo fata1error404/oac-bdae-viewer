@@ -1,0 +1,409 @@
+// 0x00FF00 – green
+// 0x00FFFF – yellow
+// 0x0000FF – red
+// 0x9ACD32 – reserved
+
+// UTILITY DATA STRUCTURES
+//________________________
+
+struct XYZ
+{
+    float           X                           <            bgcolor=0x00FF00, name="X">;
+    float           Y                           <            bgcolor=0x00FF00, name="Y">;
+    float           Z                           <            bgcolor=0x00FF00, name="Z">;
+};
+
+struct XYZW
+{
+    float           X                           <            bgcolor=0x00FF00, name="X">;
+    float           Y                           <            bgcolor=0x00FF00, name="Y">;
+    float           Z                           <            bgcolor=0x00FF00, name="Z">;
+    float           W                           <            bgcolor=0x00FF00, name="W">;
+};
+
+// HEADER
+// ______
+
+// 80 bytes
+struct BDAEHeader
+{
+    uchar           signature[4]                <            bgcolor=0x00FF00, name="File Signature">;
+    short           endian_check                <            bgcolor=0x00FF00, name="Byte Order Mark">;
+    short           version                     <            bgcolor=0x00FFFF, name="Version">;
+    uint            header_size                 <format=hex, bgcolor=0x00FF00, name="Header Size">;
+    uint            file_size                   <format=hex, bgcolor=0x00FF00, name="File Size">;
+    uint            offset_count                <            bgcolor=0x00FF00, name="Offset Count">;
+    uint            file_origin                 <            bgcolor=0x00FFFF, name="File Origin">;
+    uint64          offset_table_offset         <format=hex, bgcolor=0x00FF00, name="Offset Table Offset",       comment="absolute">;
+    uint64          string_table_offset         <format=hex, bgcolor=0x00FF00, name="String Table Offset",       comment="absolute">;
+    uint64          model_info_section_offset   <format=hex, bgcolor=0x00FF00, name="Model Info Section Offset", comment="absolute">;
+    uint64          related_files_offset        <format=hex, bgcolor=0x00FFFF, name="Related Files Offset",      comment="absolute">;
+    uint64          model_data_section_offset   <format=hex, bgcolor=0x00FF00, name="Model Data Section Offset", comment="absolute">;
+    uint            model_data_section_length   <            bgcolor=0x00FF00, name="Model Data Section Length">;
+    uint            removable_chunk_count       <            bgcolor=0x00FFFF, name="Removable Chunk Count">;
+    uint            use_separate_allocation     <            bgcolor=0x00FFFF, name="Removable Chunk Allocation Mode">;
+    uint            dynamic_chunk_size          <            bgcolor=0x00FFFF, name="Dynamic Chunk Size">;
+};
+
+// OFFSET TABLE
+// ____________
+
+struct BDAEOffsets
+{
+    local int i = 0;
+
+    for (i = 0; i < header.offset_count; i++)
+        uint64      offset_entry                <format=hex, bgcolor=0x00FF00, name="Offset">;
+};
+
+// STRING TABLE
+// ____________
+
+string getStringFromTable(uint offset)
+{
+    uint fpos = FTell(); // save position
+    FSeek(offset);
+    
+    string s = ReadString(offset);
+    
+    FSeek(fpos); // restore position
+    
+    return s;
+}
+
+uint realStringStrength(uint size) {
+    return (size == 0) ? 0 : ((int)(size / 4) + 1) * 4; // align to the next 4 bytes
+}
+
+struct String
+{
+    uint            string_length               <            bgcolor=0x00FF00>;
+    
+    if (string_length > 0)
+        char        string_value[realStringStrength(string_length)] <bgcolor=0x00FF00>;
+};
+
+struct BDAEStrings
+{
+    local uint currPos = FTell();
+
+    // keep reading strings until reaching the start of the Model Info section
+    while (currPos + 1 <= header.model_info_section_offset) {
+        FSeek(currPos);
+        String      s             <                              name="String">;           // read one String structure
+        currPos = currPos + sizeof(s.string_length) + realStringStrength(s.string_length); // advance position
+    }
+};
+
+// GENERAL INFO
+// __________________
+
+struct BDAEVersionInfo
+{
+    uint            version_string_offset           <format=hex, bgcolor=0x00FF00, name="Version String Offset",           comment=getStringFromTable>;
+    int             reserved[5]                     <            bgcolor=0x9ACD32, name="Reserved">;
+};
+
+struct BDAEAnimationsInfo
+{
+    uint            reserved[6]                     <            bgcolor=0x9ACD32, name="Reserved",                        comment="seem to be a section mark">;
+    uint            start_time_ms                   <            bgcolor=0x00FF00, name="Animation Start (ms)",            comment="timestamp of the first keyframe">;
+    uint            end_time_ms                     <            bgcolor=0x00FF00, name="Animation End (ms)",              comment="timestamp of the last keyframe">;
+    uint            animation_entry_count           <            bgcolor=0x00FF00, name="Animation Entry Count",           comment="number of animated nodes * 3; 1 entry = rotation / scale / translation of a nodes">;
+    uint            samplers_metadata_offset        <            bgcolor=0x00FF00, name="Samplers and Channels Metadata Offset", comment="relative">;
+
+    local uint real_samplers_channels_metadata_offset = FTell() - sizeof(uint) + samplers_metadata_offset;
+
+    uint            unknown_1                       <            bgcolor=0x0000FF, name="unknown">;
+    uint            animaton_metadata_offset        <            bgcolor=0x00FF00, name="Animation Metadata Offset",       comment="relative">;
+
+    local uint real_animaton_metadata_offset = FTell() - sizeof(uint) + animaton_metadata_offset;
+
+    uint            unknown[6]                      <            bgcolor=0x0000FF, name="unknown">;
+};
+
+struct BDAETexturesInfo
+{
+    uint            texture_count                   <            bgcolor=0x00FF00, name="Texture Count">;
+    uint            texture_metadata_offset         <format=hex, bgcolor=0x00FF00, name="Texture Metadata Offset",         comment="relative">;
+};
+
+struct BDAEMaterialsInfo
+{
+    uint            material_count                  <            bgcolor=0x00FF00, name="Material Count">;
+    uint            material_metadata_offset        <format=hex, bgcolor=0x00FF00, name="Material Metadata Offset",        comment="relative">;
+};
+
+struct BDAEMeshesInfo
+{
+    uint            mesh_count                      <            bgcolor=0x00FF00, name="Mesh Count">;
+    uint            mesh_metadata_offset            <format=hex, bgcolor=0x00FF00, name="Mesh Metadata Offset",            comment="relative">;
+};
+
+struct BDAEMeshSkinsInfo
+{
+    uint            mesh_skin_count                 <            bgcolor=0x00FF00, name="Mesh Skin Count">;
+    uint            mesh_skin_metadata_offset       <format=hex, bgcolor=0x00FF00, name="Mesh Skin Metadata Offset",       comment="relative">;
+};
+
+struct BDAENodeTreesInfo
+{
+    uint            node_tree_count                 <            bgcolor=0x00FF00, name="Node Tree Count">;
+    uint            node_tree_metadata_offset       <format=hex, bgcolor=0x00FF00, name="Node Tree Metadata Offset",       comment="relative">;
+};
+
+
+struct BDAEUnknownInfo
+{
+    uint            unknown_count                   <            bgcolor=0x0000FF, name="unknown count">;
+    uint            sources_metadata_offset         <            bgcolor=0x0000FF, name="unknown metadata offset">;
+};
+
+struct BDAEModelInfo
+{
+    BDAEVersionInfo         version_info            <                              name="Version Info">;
+    BDAEAnimationsInfo      animations_info         <                              name="Animations Info">;
+    BDAETexturesInfo        textures_info           <                              name="Textures Info">;
+    BDAEUnknownInfo         unknown_info_1          <                              name="unknown">;
+    BDAEMaterialsInfo       materials_info          <                              name="Materials Info">;
+    BDAEMeshesInfo          meshes_info             <                              name="Meshes Info">;
+    BDAEMeshSkinsInfo       mesh_skins_info         <                              name="Mesh Skins Info">;
+    BDAEUnknownInfo         unknown_info_2[4]       <                              name="unknown">;
+    BDAENodeTreesInfo       node_trees_info         <                              name="Node Trees Info">;
+    BDAEUnknownInfo         unknown_info_3[4]       <                              name="unknown">;
+};
+
+// ANIMATION DATA
+// __________
+
+// ----- Samplers and Channels Metadata -----
+
+struct BDAESamplerAndChannelMetadata
+{
+    uint64          animation_entry_name            <            bgcolor=0x00FF00, name="Animation Entry Name",            comment=getStringFromTable>;
+    uint            sampler_count                   <            bgcolor=0x00FF00, name="Sampler Count",                   comment="usually 1; sampler tells 'how to animate' - animation data">;
+    uint            sampler_data_offset             <            bgcolor=0x00FF00, name="Sampler Data Offset",             comment="relative">;
+
+    local uint real_sampler_data_offset = FTell() - sizeof(uint) + sampler_data_offset;
+
+    uint            channel_count                   <            bgcolor=0x00FF00, name="Channel Count",                   comment="usually 1; channel tells 'what to animate' - animation target">;
+    uint            channel_data_offset             <            bgcolor=0x00FF00, name="Channel Data Offset",             comment="relative">;
+
+    local uint real_channel_data_offset = FTell() - sizeof(uint) + channel_data_offset;
+
+    uint            unknown_1                       <            bgcolor=0x0000FF, name="unknown">;
+    uint            unknown_2                       <            bgcolor=0x0000FF, name="unknown">;
+    uint            default_animation_data_offset   <            bgcolor=0x00FF00, name="Default Animation Data Offset",   comment="relative">;
+
+    local uint real_default_animation_data_offset = FTell() - sizeof(uint) + default_animation_data_offset;
+
+    uint            unknown_3                       <            bgcolor=0x0000FF, name="unknown">;
+};
+
+struct BDAESamplersAndChannelsMetadata
+{
+    local int i;
+
+    for (i = 0; i < model_info.animations_info.animation_entry_count; i++)
+        BDAESamplerAndChannelMetadata  sampler_channel  <name="Animation">;
+};
+
+// ----- Samplers and Channels Data -----
+
+string matchInterpolationTypeName(uint interpolation_type)
+{
+    switch(interpolation_type)
+    {
+        case 0:  return "IT_STEP";
+        case 1:  return "IT_LINEAR";
+        case 2:  return "IT_HERMITE";
+        default: return Str("UNKNOWN_TYPE_%u", interpolation_type);
+    }
+}
+
+string matchDataTypeName(uint data_type)
+{
+    switch(data_type)
+    {
+        case 0:  return "DAE_BYTE";
+        case 1:  return "DAE_UNSIGNED_BYTE";
+        case 2:  return "DAE_SHORT";
+        case 3:  return "DAE_UNSIGNED_SHORT";
+        case 4:  return "DAE_INT";
+        case 5:  return "DAE_UNSIGNED_INT";
+        case 6:  return "DAE_FLOAT";
+        default: return Str("UNKNOWN_TYPE_%u", data_type);
+    }
+}
+
+string matchChannelTypeName(uint channel_type)
+{
+    switch(channel_type)
+    {
+        case 1:  return "CT_POSITION";
+        case 5:  return "CT_ROTATION";
+        case 10: return "CT_SCALE";
+        default: return Str("UNKNOWN_TYPE_%u", channel_type);
+    }
+}
+
+struct BDAEAnimationSamplerData
+{
+    uint            interpolation_type              <            bgcolor=0x00FF00, name="Keyframes Interpolation Type",    comment=matchInterpolationTypeName>;
+    uint            input_source_type               <            bgcolor=0x00FF00, name="Timestamp Value Data Type",       comment=matchDataTypeName>;
+    uint            input_component_count           <            bgcolor=0x00FF00, name="Timestamp Value Component Count", comment="usually 1">;
+    uint            input_source_id                 <            bgcolor=0x00FF00, name="Timestamp Value Array ID">;
+    uint            output_source_type              <            bgcolor=0x00FF00, name="Animation Value Data Type",       comment=matchDataTypeName>;
+    uint            output_component_count          <            bgcolor=0x00FF00, name="Animation Value Component Count", comment="3 or 4, depends on animation type">;
+    uint            output_source_id                <            bgcolor=0x00FF00, name="Animation Value Array ID">;
+    uint            reserved                        <            bgcolor=0x9ACD32, name="Reserved">;
+};
+
+struct BDAEAnimationChannelData
+{
+    uint64          channel_target_node_name        <            bgcolor=0x00FF00, name="Channel Target Node Name",        comment=getStringFromTable>;
+    uint            channel_animation_type          <            bgcolor=0x00FF00, name="Channel Animation Type",          comment=matchChannelTypeName>;
+    uint            reserved[3]                     <            bgcolor=0x9ACD32, name="Reserved">;
+};
+
+struct BDAEDefaultAnimationData
+{
+    struct ComponentMask
+    {
+        uint use_x    : 1;   // bit 0
+        uint use_y    : 1;   // bit 1
+        uint use_z    : 1;   // bit 2
+        uint use_w    : 1;   // bit 3
+        uint reserved : 28;  // remaining 28 bits of uint
+    };
+
+    ComponentMask   component_mask                  <            bgcolor=0x00FF00, name="Default Active Values Bitmask",   comment="">;
+    uint            value_count                     <            bgcolor=0x00FF00, name="Default Value Count">;
+    uint            value_data_offset               <            bgcolor=0x00FF00, name="Default Value Data Offset",       comment="relative">;
+    uint            reserved_1                      <            bgcolor=0x9ACD32, name="Reserved">;
+    
+    if (value_count == 3)
+    {
+        XYZ         default_value                   <            bgcolor=0x00FF00, name="Default Animation Values">;
+        uint        reserved_2                      <            bgcolor=0x9ACD32, name="Reserved">;
+    }
+    else
+        XYZW        default_animation_value         <            bgcolor=0x00FF00, name="Default Animation Values">;
+};
+
+struct BDAESamplerAndChannelData
+{
+    local int j;
+
+    FSeek(samplers_channels.sampler_channel[i].real_sampler_data_offset);
+
+    for (j = 0; j < samplers_channels.sampler_channel[i].sampler_count; j++)
+        BDAEAnimationSamplerData  sampler_data  <name="Sampler">;
+
+    FSeek(samplers_channels.sampler_channel[i].real_channel_data_offset);
+
+    for (j = 0; j < samplers_channels.sampler_channel[i].channel_count; j++)
+        BDAEAnimationChannelData  channel_data  <name="Channel">;
+
+    FSeek(samplers_channels.sampler_channel[i].real_default_animation_data_offset);
+    BDAEDefaultAnimationData  default_animation_data  <name="Default Animation">;
+};
+
+struct BDAESamplersAndChannelsData
+{
+    local int i;
+
+    for (i = 0; i < model_info.animations_info.animation_entry_count; i++)
+        BDAESamplerAndChannelData  sampler_channel_data  <name="Animation">;
+};
+
+
+
+
+// ----- Animations Metadata -----
+
+struct BDAETimestampAndTransformMetadata
+{
+    uint            timestamp_count                 <            bgcolor=0x00FF00, name="Timestamp Count">;
+    uint            timestamp_data_offset           <            bgcolor=0x00FF00, name="Timestamp Data Offset",           comment="relative">;
+    uint            transformation_count            <            bgcolor=0x00FF00, name="Transformation Count">;
+    uint            transformation_data_offset      <            bgcolor=0x00FF00, name="Transformation Data Offset",      comment="relative">;
+
+    local uint real_timestamp_data_offset = FTell() - 3 * sizeof(uint) + timestamp_data_offset;
+    local uint real_transformation_data_offset = FTell() - sizeof(uint) + transformation_data_offset;
+};
+
+struct BDAEAnimationsMetadata
+{
+    uint            unknown_1                       <            bgcolor=0x0000FF, name="unknown">;
+    uint            unknown_2                       <            bgcolor=0x0000FF, name="unknown">;
+    uint            start_time_ms                   <            bgcolor=0x00FF00, name="Animation Start (ms)",            comment="duplicate">;
+    uint            end_time_ms                     <            bgcolor=0x00FF00, name="Animation End (ms)",              comment="duplicate">;
+    uint            unknown_3                       <            bgcolor=0x0000FF, name="unknown">;
+    uint            unknown_4                       <            bgcolor=0x0000FF, name="unknown">;
+    uint            unknown_5                       <            bgcolor=0x0000FF, name="unknown">;
+    uint            unknown_6                       <            bgcolor=0x0000FF, name="unknown">;
+    uint            source_count                    <            bgcolor=0x00FF00, name="Timestamp + Transformation Entry Count", comment="animation entry count * 2">;
+
+    local int i;
+
+    for (i = 0; i < source_count / 2; i++)
+        BDAETimestampAndTransformMetadata  animation  <name="Animation">;
+};
+
+// ----- Animations Data -----
+
+struct BDAETimestampData
+{
+    local int j;
+
+    for (j = 0; j < animations.animation[animations_data.i].timestamp_count; j++)
+        byte        frame_number                    <            bgcolor=0x00FF00, name="Frame Number">;
+};
+
+struct BDAETransformationData
+{
+    local int j;
+
+    for (j = 0; j < animations.animation[animations_data.i].transformation_count; j++)
+        XYZW        transform                       <            bgcolor=0x00FF00>;
+};
+
+struct BDAEAnimationData
+{
+    FSeek(animations.animation[i].real_timestamp_data_offset);
+    BDAETimestampData  timestamp_data  <name="Timestamp">;
+
+    FSeek(animations.animation[i].real_transformation_data_offset);
+    BDAETransformationData  transformation_data  <name="Transformation">;
+};
+
+struct BDAEAnimationsData
+{
+    local int i;
+
+    for (i = 0; i < animations.source_count; i++)
+        BDAEAnimationData  animation_data  <name="Animation">;
+};
+
+
+// BDAE FILE STRUCTURE
+// ___________________
+
+struct BDAEFile
+{
+    FSeek(0);
+    BDAEHeader                          header                   <                              name="BDAE Header">;
+    FSeek(header.offset_table_offset);
+    BDAEOffsets                         offsets                  <                              name="BDAE Offset Table">;
+    FSeek(header.string_table_offset);
+    BDAEStrings                         strings                  <                              name="BDAE String Table">;
+    FSeek(header.model_info_section_offset);
+    BDAEModelInfo                       model_info               <                              name="BDAE Model Info">;
+    FSeek(model_info.animations_info.real_samplers_channels_metadata_offset);
+    BDAESamplersAndChannelsMetadata     samplers_channels        <                              name="BDAE Samplers and Channels Metadata">;
+    BDAESamplersAndChannelsData         samplers_channels_data   <                              name="BDAE Samplers and Channels Data">;
+    FSeek(model_info.animations_info.real_animaton_metadata_offset);
+    BDAEAnimationsMetadata              animations               <                              name="BDAE Animations Metadata">;
+    BDAEAnimationsData                  animations_data          <                              name="BDAE Animations Data">;
+} file <name="BDAE File">;

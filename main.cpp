@@ -300,7 +300,7 @@ int main()
 
 					if (ImGui::SliderInt("##animation_selector", &bdaeModel.selectedAnimation, 0, bdaeModel.animationCount - 1))
 					{
-						bdaeModel.pauseAnimation();
+						bdaeModel.animationPlaying = false;
 						bdaeModel.resetAnimation();
 					}
 
@@ -317,9 +317,9 @@ int main()
 				if (ImGui::ImageButton("##animation_play_button", bdaeModel.animationPlaying ? stopIcon : playIcon, ImVec2(25, 25)))
 				{
 					if (!bdaeModel.animationPlaying)
-						bdaeModel.playAnimation();
+						bdaeModel.animationPlaying = true;
 					else
-						bdaeModel.pauseAnimation();
+						bdaeModel.animationPlaying = false;
 				}
 
 				ImGui::PopStyleColor(3);

@@ -1532,15 +1532,15 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool rende
 		if (tile->models.empty())
 			continue;
 
-		for (auto &mi : tile->models)
+		for (auto &model : tile->models)
 		{
-			const std::shared_ptr<Model> &m = mi.first;
-			const glm::mat4 &instModel = mi.second;
+			const std::shared_ptr<Model> &modelData = model.first;
+			const glm::mat4 &modelWorldTransform = model.second;
 
-			if (!m)
+			if (!modelData)
 				continue;
 
-			m->draw(instModel, view, projection, camera.Position, dt, light.showLighting, simple);
+			modelData->draw(modelWorldTransform, view, projection, camera.Position, dt, light.showLighting, simple);
 		}
 	}
 

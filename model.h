@@ -3,11 +3,11 @@
 
 #include <string>
 #include <vector>
-#include <map>
-#include <unordered_map>
 #include <cstdint>
+#include <unordered_map>
 #include "IReadResFile.h"
-#include "libs/glm/fwd.hpp"
+#include "libs/glm/glm.hpp"
+#include "libs/glm/gtc/quaternion.hpp"
 #include "shader.h"
 #include "sound.h"
 #include "light.h"
@@ -34,127 +34,6 @@ typedef uint64_t BDAEint;
 
 const float meshRotationSensitivity = 0.3f;
 
-// Animation structures
-// ____________________
-
-enum class AnimationLoopMode
-{
-	LOOP = 0,	 // Normal loop: play forward, restart at beginning
-	PINGPONG = 1 // Ping-pong: play forward, then reverse, then forward again
-};
-
-enum class InterpolationType
-{
-	STEP = 0,
-	LINEAR = 1,
-	HERMITE = 2
-};
-
-enum class ChannelType
-{
-	Transform = 0,
-	Translation = 1,
-	Position_X = 2,
-	Position_Y = 3,
-	Position_Z = 4,
-	Rotation = 5,
-	Rotation_X = 6,
-	Rotation_Y = 7,
-	Rotation_Z = 8,
-	Rotation_W = 9,
-	Scale = 10,
-	Scale_X = 11,
-	Scale_Y = 12,
-	Scale_Z = 13
-};
-
-enum class DataType
-{
-	BYTE = 0,
-	UBYTE = 1,
-	SHORT = 2,
-	USHORT = 3,
-	INT = 4,
-	UINT = 5,
-	FLOAT = 6
-};
-
-// Keyframe source data
-struct KeyframeSource
-{
-	DataType dataType;
-	int componentCount;
-	std::vector<float> data; // All data converted to float for simplicity
-};
-
-// Animation sampler (links input time to output keyframes)
-struct AnimationSampler
-{
-	InterpolationType interpolation;
-	int inputSourceIndex;  // Index into sources array (time values)
-	int outputSourceIndex; // Index into sources array (keyframe values)
-	DataType inputType;
-	int inputComponentCount;
-	DataType outputType;
-	int outputComponentCount;
-};
-
-// Animation channel (links sampler to target node and property)
-struct AnimationChannel
-{
-	std::string targetNodeName; // Name of the node to animate
-	ChannelType channelType;	// What property to animate (translation, rotation, scale)
-	int samplerIndex;			// Index into samplers array
-};
-
-// Complete animation
-struct Animation
-{
-	std::string name;
-	std::vector<AnimationSampler> samplers;
-	std::vector<AnimationChannel> channels;
-	float duration; // Calculated from max time value
-};
-
-// Node structure for hierarchy
-// ____________________
-
-struct Node
-{
-	std::string ID;				   // Node ID (e.g., "Bone001-node")
-	std::string mainName;		   // Node name (e.g., "Bone001")
-	std::string boneName;		   // Node name for skinning/bone mapping (e.g., "Bone1", "Bone2")
-	int parentIndex;			   // Index of parent node (-1 = root)
-	std::vector<int> childIndices; // Indices of child nodes
-
-	// Local transform (relative to parent)
-	glm::vec3 localTranslation;
-	glm::quat localRotation;
-	glm::vec3 localScale;
-
-	// Original transform (for animation reset)
-	glm::vec3 defaultTranslation;
-	glm::quat defaultRotation;
-	glm::vec3 defaultScale;
-
-	// World transform (accumulated from root)
-	glm::mat4 totalTransform;
-	glm::mat4 pivotTransform; // Stores the initial pivot offset
-
-	Node()
-		: parentIndex(-1),
-		  localTranslation(0),
-		  localRotation(1, 0, 0, 0),
-		  localScale(1),
-		  defaultTranslation(0),
-		  defaultRotation(1, 0, 0, 0),
-		  defaultScale(1),
-		  totalTransform(1.0f),
-		  pivotTransform(1.0f)
-	{
-	}
-};
-
 // 60 or 80 bytes (depends on .bdae version)
 struct BDAEFileHeader
 {
@@ -176,6 +55,50 @@ struct BDAEFileHeader
 	unsigned int sizeOfDynamic;								// 4 bytes  size of dynamic chunk (?)
 };
 
+struct Vertex
+{
+	glm::vec3 PosCoords;
+	glm::vec3 Normal;
+	glm::vec2 TexCoords;
+	char BoneIndices[4];  // indices into boneNames array (up to 4 bones can influence 1 vertex)
+	float BoneWeights[4]; // influence weights in [0, 1] range
+};
+
+struct Node
+{
+	std::string ID;				   // 1st node name (e.g. 'Bip001_Head-node')
+	std::string mainName;		   // 2nd node name; used for mesh mapping (e.g. 'Bip001_Head')
+	std::string boneName;		   // 3rd node name; used for bone mapping (e.g. 'Bone3')
+	int parentIndex;			   // index of parent node into nodes array (-1 = root)
+	std::vector<int> childIndices; // indices of child nodes into nodes array
+
+	glm::mat4 pivotTransform; // transformation of the child helper PIVOT node (if it exists)
+
+	// original transformation; used for animation reset
+	glm::vec3 defaultTranslation;
+	glm::quat defaultRotation;
+	glm::vec3 defaultScale;
+
+	// own current transformation; updated each frame during animation
+	glm::vec3 localTranslation;
+	glm::quat localRotation;
+	glm::vec3 localScale;
+
+	glm::mat4 totalTransform; // parent * local * pivot
+};
+
+struct BaseAnimation
+{
+	// channel data
+	std::string targetNodeName; // model node that this animation affects
+	int animationType;			// 1 = translation | 5 = rotation | 10 = scale
+
+	// sampler data
+	int interpolationType;							 // 0 = step | 1 = linear | 2 = hermite
+	std::vector<float> timestamps;					 // time values in seconds
+	std::vector<std::vector<float>> transformations; // transformation values (vectors or quaternions)
+};
+
 // Class for loading and rendering 3D model.
 // _________________________________________
 
@@ -188,81 +111,69 @@ class Model
 	std::vector<int> submeshTextureIndex;
 	int fileSize, vertexCount, faceCount, totalSubmeshCount;
 	int textureCount, alternativeTextureCount, selectedTexture;
-	unsigned int VAO;								  // Vertex Attribute Object ID (stores vertex attribute configuration on GPU)
-	unsigned int VBO;								  // Vertex Buffer Object ID (stores vertex data on GPU)
-	unsigned int boneWeightsVBO;					  // VBO for bone weights
-	unsigned int boneIndicesVBO;					  // VBO for bone IDs
-	std::vector<unsigned int> EBOs;					  // Element Buffer Object ID for each submesh (stores index data on GPU)
-	std::vector<float> vertices;					  // vertex data for whole model (x1, y1, z1, x2, y2, z2, .. )
+	unsigned int VAO;				// Vertex Attribute Object ID (stores vertex attribute configuration on GPU)
+	unsigned int VBO;				// Vertex Buffer Object ID (stores vertex data on GPU)
+	std::vector<unsigned int> EBOs; // Element Buffer Object ID for each submesh (stores index data on GPU)
+
+	std::vector<Vertex> vertices;					  // vertex data
 	std::vector<std::vector<unsigned short>> indices; // index data for each submesh (triangles)
 	std::vector<unsigned int> textures;				  // texture ID(s)
 	std::vector<std::string> sounds;				  // sound file name(s)
-	std::unordered_map<int, int> submeshToMeshIdx;
-	glm::vec3 meshCenter;
+
+	glm::vec3 modelCenter; // geometric center of the model
 
 	float meshPitch = 0.0f;
 	float meshYaw = 0.0f;
+
 	bool modelLoaded;
 
 	char *DataBuffer; // raw binary content of .bdae file
 
-	// Node hierarchy
-	std::vector<Node> nodes;								// All nodes in the model
-	std::unordered_map<std::string, int> nodeNameToIdx;		// Quick lookup: node name -> index
-	std::unordered_map<std::string, int> boneNameToNodeIdx; // // [TODO] this hash table should be used instead of indexing nodes with bone names
-	std::unordered_map<int, int> meshToNodeIdx;				// Maps mesh index to node index (reverse lookup for fast rendering)
-	int nodeCollectionCount;								// Number of node collections in the model
+	std::vector<Node> nodes; // node tree
+	Shader defaultShader;	 // for nodes visualization
+	unsigned int nodeVAO, nodeVBO, nodeEBO;
 
-	// Skinning data (bone weights and IDs per vertex)
-	std::vector<std::pair<char, float>> boneInfluences; // 4 influences per vertex (interleaved, ID & weight)
-	bool hasSkinningData;								// Whether the model has bone weights/IDs
-	std::vector<glm::mat4> boneTransforms;				// Final bone transformation matrices for skinning (sent to shader)
-	std::vector<glm::mat4> bindPoseMatrices;			// Inverse bind pose matrices (parsed from file)
-	std::unordered_map<int, int> boneToNodeIdx;			// Maps bone index -> node index (for correct bone transform lookup)
-	std::vector<std::string> boneNames;					// Actual bone names from file (e.g., "Bip01", "Bip01_Pelvis")
-	glm::mat4 bone001RootTransform;						// Global root transform for Bone001 (when it has no node)
+	// skinning data
+	bool hasSkinningData;
+	std::vector<std::string> boneNames;
+	std::vector<glm::mat4> bindPoseMatrices;	// inverse bind pose matrix for each bone; this matrix transforms a vertex from its position to bone's local space
+	std::vector<glm::mat4> boneTotalTransforms; // skinning matrix for each bone (it is node transform * inverse bind pose matrix); this matrix transforms a vertex to node's animated position
 
-	// Node visualization
-	Shader nodeShader;						// Shader for rendering nodes
-	unsigned int nodeVAO, nodeVBO, nodeEBO; // OpenGL buffers for node sphere
-	int nodeSphereVertexCount;				// Number of vertices in unit sphere
-	int nodeSphereIndexCount;				// Number of indices in unit sphere
+	// animation data
+	std::vector<std::pair<float, std::vector<BaseAnimation>>> animations; // all loaded animation files data; for each file: {duration, set of base animations}
+	bool animationsLoaded;												  // whether at least one animation file is loaded
+	bool animationPlaying;												  // whether animation is playing
+	int animationCount;													  // number of animation files found
+	int selectedAnimation;												  // currently selected animation file index
+	float currentAnimationTime;											  // current playback time
 
-	// Animation data
-	std::vector<std::string> animationFileNames;				 // List of all animation file paths
-	std::vector<std::vector<Animation>> animationSets;			 // Animation sets (one per file)
-	std::vector<std::vector<KeyframeSource>> keyframeSourceSets; // Keyframe sources (one per file)
-	int animationCount;											 // Number of animation files found
-	int selectedAnimation;										 // Currently selected animation file index
-	bool animationsLoaded;										 // Whether animations have been loaded
-	float currentAnimationTime;									 // Current playback time
-	bool animationPlaying;										 // Whether animation is playing
-	float animationSpeed;										 // Playback speed multiplier
-	AnimationLoopMode loopMode;									 // How animation should loop
-	bool animationReversed;										 // Whether animation is playing in reverse (for ping-pong)
+	// utility hash tables
+	std::unordered_map<int, int> submeshToMeshIdx;			// (index in EBOs array → ..)
+	std::unordered_map<int, int> meshToNodeIdx;				// (index in meshNames array → index in nodes array)
+	std::unordered_map<std::string, int> nodeNameToIdx;		// (node name → index in nodes array)
+	std::unordered_map<std::string, int> boneNameToNodeIdx; // (bone name → index in nodes array)
+	std::unordered_map<int, int> boneToNodeIdx;				// (index in boneNames array → index in nodes array)
 
 	Model(const char *vertex, const char *fragment)
-		: shader(vertex, fragment),
-		  nodeShader("shaders/default.vs", "shaders/default.fs"),
-		  totalSubmeshCount(0),
-		  VAO(0), VBO(0), boneWeightsVBO(0), boneIndicesVBO(0),
+		: DataBuffer(NULL),
+		  shader(vertex, fragment),
+		  defaultShader("shaders/default.vs", "shaders/default.fs"),
+		  VAO(0), VBO(0),
 		  nodeVAO(0), nodeVBO(0), nodeEBO(0),
-		  nodeSphereVertexCount(0),
-		  nodeSphereIndexCount(0),
-		  modelLoaded(false),
-		  meshCenter(glm::vec3(-1.0f)),
-		  DataBuffer(NULL),
-		  nodeCollectionCount(0),
+		  fileSize(0),
+		  vertexCount(0), faceCount(0),
+		  totalSubmeshCount(0),
+		  modelCenter(glm::vec3(-1.0f)),
+		  textureCount(0),
+		  alternativeTextureCount(0),
+		  selectedTexture(0),
 		  hasSkinningData(false),
-		  bone001RootTransform(glm::mat4(1.0f)),
+		  modelLoaded(false),
+		  animationsLoaded(false),
+		  animationPlaying(false),
 		  animationCount(0),
 		  selectedAnimation(0),
-		  animationsLoaded(false),
-		  currentAnimationTime(0.0f),
-		  animationPlaying(false),
-		  animationSpeed(1.0f),
-		  loopMode(AnimationLoopMode::PINGPONG),
-		  animationReversed(false)
+		  currentAnimationTime(0.0f)
 	{
 		shader.use();
 		shader.setInt("modelTexture", 0);
@@ -273,13 +184,17 @@ class Model
 		shader.setFloat("specularStrength", specularStrength);
 	}
 
-	// functions related to parsing
-	// implementation in parserBDAE.cpp
+	// functions for parsing: implemented in parserBDAE.cpp
 	// ____________________
 
+	//! Parses .bdae model file: textures, materials, meshes, mesh skin (if exist), and node tree.
 	int init(IReadResFile *file);
 
+	//! Loads .bdae model file from disk, calls init function and searches for animations, sounds, and alternative colors.
 	void load(const char *fpath, Sound &sound, bool isTerrainViewer);
+
+	//! Loads .bdae animation file from disk and parses animation samplers, channels, and data (timestamps and transformations).
+	void loadAnimation(const char *animationFilePath);
 
 	//! Recursively parses a node and its children.
 	void parseNodesRecursive(int nodeOffset, int parentIndex);
@@ -293,36 +208,29 @@ class Model
 	//! Recursively searches down the tree starting from a given node for the first node with '_PIVOT' in its ID and returns its local transformation matrix.
 	glm::mat4 getPIVOTNodeTransformationRecursive(int nodeIndex);
 
-	void updateVertexBufferWithBoneData();
-
-	void searchAnimationFiles(const char *modelPath, bool isUnsortedFolder);
-
-	void loadAnimations(const char *animationFilePath);
-
+	// functions for rendering: implemented in model.cpp
 	// ____________________
 
-	void reset();
-
+	//! Renders .bdae model.
 	void draw(glm::mat4 model, glm::mat4 view, glm::mat4 projection, glm::vec3 cameraPos, float dt, bool lighting, bool simple);
 
-	//! Node hierarchy functions
-	void updateMeshTransformsFromNodes();
-	void updateBoneTransforms();			  // Update bone transformation matrices for skinning
-	void debugBoneTransforms(float animTime); // Debug: Print detailed bone transform info
+	//! Applies a base animation (translation / rotation / scale) at a specific time, targeting one node.
+	void applyBaseAnimation(BaseAnimation &baseAnim, float time);
 
-	//! Node visualization functions
-	void generateUnitSphere();
-	void drawNodes(glm::mat4 model, glm::mat4 view, glm::mat4 projection);
+	//! Interpolates between two floats.
+	float interpolateFloat(float a, float b, float t, int interpolationType);
 
-	//! Animation functions
-	void updateAnimations(float deltaTime);
-	void applyAnimation(const Animation &anim, float time);
-	float interpolateFloat(float a, float b, float t, InterpolationType interp);
-	glm::vec3 interpolateVec3(const glm::vec3 &a, const glm::vec3 &b, float t, InterpolationType interp);
-	glm::quat interpolateQuat(const glm::quat &a, const glm::quat &b, float t, InterpolationType interp);
-	void playAnimation();
-	void pauseAnimation();
+	//! Interpolates between two vectors.
+	glm::vec3 interpolateVec3(glm::vec3 &a, glm::vec3 &b, float t, int interpolationType);
+
+	//! Interpolates between two quaternions.
+	glm::quat interpolateQuat(glm::quat &a, glm::quat &b, float t, int interpolationType);
+
+	//! Resets animation to beginning.
 	void resetAnimation();
+
+	//! Clears GPU memory and resets viewer state.
+	void reset();
 };
 
 #endif

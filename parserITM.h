@@ -187,7 +187,7 @@ inline void loadEntity(CZipResReader *physicsArchive, const char *fname, const E
 
 	if (bdaeModel)
 	{
-		// build OpenGL style model matrix: translate -> rotate -> scale
+		// build OpenGL style model matrix: scale -> rotate -> translate
 		glm::mat4 model = glm::mat4(1.0f);
 		model = glm::translate(glm::mat4(1.0f), glm::vec3(entityInfo.relativePos.X + tileOff.X, entityInfo.relativePos.Y + tileOff.Y, entityInfo.relativePos.Z + tileOff.Z));
 		model *= glm::mat4_cast(glm::quat(-entityInfo.rotation.W, entityInfo.rotation.X, entityInfo.rotation.Y, entityInfo.rotation.Z));

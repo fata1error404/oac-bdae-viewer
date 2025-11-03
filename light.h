@@ -29,7 +29,7 @@ class Light
 	{
 		shader.use();
 		shader.setMat4("model", glm::translate(glm::mat4(1.0f), lightPos));
-		shader.setVec3("Color", lightColor);
+		shader.setVec3("color", lightColor);
 
 		float vertices[] = {
 			-0.5f, -0.5f, -0.5f,
