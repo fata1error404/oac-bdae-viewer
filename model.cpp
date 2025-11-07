@@ -54,7 +54,7 @@ void Model::draw(glm::mat4 model, glm::mat4 view, glm::mat4 projection, glm::vec
 			for (int i = 0, boneCount = boneTotalTransforms.size(); i < boneCount; i++)
 			{
 				int nodeIndex = boneToNodeIdx[i];
-				boneTotalTransforms[i] = nodes[nodeIndex].totalTransform * bindPoseMatrices[i]; // this is core formula for skeletal animation skinning; the resulting skinning matrix needs to be applied to a vertex to make it move with a specific bone (with respect to this bone weight and influence of other bones; see vertex shader)
+				boneTotalTransforms[i] = bindShapeMatrix * nodes[nodeIndex].totalTransform * bindPoseMatrices[i]; // this is core formula for skeletal animation skinning; the resulting skinning matrix needs to be applied to a vertex to make it move with a specific bone (with respect to this bone weight and influence of other bones; see vertex shader)
 				shader.setMat4("boneTotalTransforms[" + std::to_string(i) + "]", boneTotalTransforms[i]);
 			}
 		}

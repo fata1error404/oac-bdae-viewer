@@ -136,7 +136,8 @@ class Model
 	// skinning data
 	bool hasSkinningData;
 	std::vector<std::string> boneNames;
-	std::vector<glm::mat4> bindPoseMatrices;	// inverse bind pose matrix for each bone; this matrix transforms a vertex from its position to bone's local space
+	glm::mat4 bindShapeMatrix;					// correction matrix that transforms all model vertices from their raw positions defined in the .bdae file (mesh local space) to skeleton (or "bind pose") space (coordinate system where the skeleton was defined)
+	std::vector<glm::mat4> bindPoseMatrices;	// inverse bind pose matrix for each bone; transforms vertices from their bind positions in skeleton space to the bone's local space
 	std::vector<glm::mat4> boneTotalTransforms; // skinning matrix for each bone (it is node transform * inverse bind pose matrix); this matrix transforms a vertex to node's animated position
 
 	// animation data

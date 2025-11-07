@@ -401,6 +401,7 @@ int Model::init(IReadResFile *file)
 		int maxInfluence;									  // how many bones can influence one vertex
 
 		memcpy(&bindPoseDataOffset, DataBuffer + header->offsetData + 128 + 4 + meshSkinMetadataOffset + 16 + meshSkinDataOffset + 4, sizeof(int));
+		memcpy(&bindShapeMatrix, DataBuffer + header->offsetData + 128 + 4 + meshSkinMetadataOffset + 16 + meshSkinDataOffset + 16, sizeof(glm::mat4));
 		memcpy(&boneCount, DataBuffer + header->offsetData + 128 + 4 + meshSkinMetadataOffset + 16 + meshSkinDataOffset + 120, sizeof(int));
 		memcpy(&boneNamesOffset, DataBuffer + header->offsetData + 128 + 4 + meshSkinMetadataOffset + 16 + meshSkinDataOffset + 124, sizeof(int));
 		memcpy(&boneInfluenceFloatCount, DataBuffer + header->offsetData + 128 + 4 + meshSkinMetadataOffset + 16 + meshSkinDataOffset + 128, sizeof(int));
