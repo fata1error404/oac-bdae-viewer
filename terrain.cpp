@@ -139,13 +139,13 @@ void Terrain::load(const char *fpath, Sound &sound)
 		glGenBuffers(sky.totalSubmeshCount, sky.EBOs.data());
 		glBindVertexArray(sky.VAO);
 		glBindBuffer(GL_ARRAY_BUFFER, sky.VBO);
-		glBufferData(GL_ARRAY_BUFFER, sky.vertices.size() * sizeof(float), sky.vertices.data(), GL_STATIC_DRAW);
-		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)0);
+		glBufferData(GL_ARRAY_BUFFER, sky.vertices.size() * sizeof(Vertex), sky.vertices.data(), GL_STATIC_DRAW);
 		glEnableVertexAttribArray(0);
-		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(3 * sizeof(float)));
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void *)0);
 		glEnableVertexAttribArray(1);
-		glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(6 * sizeof(float)));
+		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void *)(3 * sizeof(float)));
 		glEnableVertexAttribArray(2);
+		glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void *)(6 * sizeof(float)));
 
 		for (int i = 0; i < sky.totalSubmeshCount; i++)
 		{
@@ -1114,12 +1114,13 @@ void Terrain::activateTile(TileTerrain *tile)
 			glGenBuffers(model->totalSubmeshCount, model->EBOs.data());
 			glBindVertexArray(model->VAO);
 			glBindBuffer(GL_ARRAY_BUFFER, model->VBO);
-			glBufferData(GL_ARRAY_BUFFER, model->vertices.size() * sizeof(float), model->vertices.data(), GL_STATIC_DRAW);
-			glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)0);
+			glBufferData(GL_ARRAY_BUFFER, model->vertices.size() * sizeof(Vertex), model->vertices.data(), GL_STATIC_DRAW);
+
+			glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void *)0);
 			glEnableVertexAttribArray(0);
-			glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(3 * sizeof(float)));
+			glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void *)(3 * sizeof(float)));
 			glEnableVertexAttribArray(1);
-			glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(6 * sizeof(float)));
+			glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void *)(6 * sizeof(float)));
 			glEnableVertexAttribArray(2);
 
 			for (int i = 0; i < model->totalSubmeshCount; i++)

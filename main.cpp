@@ -75,7 +75,7 @@ int main()
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
 	// GLFW window creation
-	GLFWwindow *window = glfwCreateWindow(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, "BDAE 3D Model Viewer", NULL, NULL);
+	GLFWwindow *window = glfwCreateWindow(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, "BDAE 3D Model Viewer v.1.4", NULL, NULL);
 
 	// set window icon
 	int width, height, nrChannels;

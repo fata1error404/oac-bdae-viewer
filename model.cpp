@@ -6,7 +6,22 @@ void Model::draw(glm::mat4 model, glm::mat4 view, glm::mat4 projection, glm::vec
 	if (!modelLoaded)
 		return;
 
-	if (animationsLoaded && animationPlaying)
+	// [FIX] when loading models in terrain viewer mode, some models are corrupted
+	if (VAO == 0)
+		return;
+
+	bool isTerrainViewer = (modelCenter == glm::vec3(-1.0f)) ? true : false; // in 3D viewer mode, the model center in initialized (false)
+
+	if (!isTerrainViewer)
+	{
+		model = glm::mat4(1.0f);
+		model = glm::translate(model, modelCenter); // a trick to build the correct model matrix that rotates the model around its center
+		model = glm::rotate(model, glm::radians(meshPitch), glm::vec3(1, 0, 0));
+		model = glm::rotate(model, glm::radians(meshYaw), glm::vec3(0, 1, 0));
+		model = glm::translate(model, -modelCenter);
+	}
+
+	if (animationsLoaded && (animationPlaying || isTerrainViewer)) // [TEST] are there animated models among terrain models?
 	{
 		float duration = animations[selectedAnimation].first;
 		std::vector<BaseAnimation> &baseAnimations = animations[selectedAnimation].second;
@@ -26,15 +41,6 @@ void Model::draw(glm::mat4 model, glm::mat4 view, glm::mat4 projection, glm::vec
 			if (nodes[i].parentIndex == -1)
 				updateNodesTransformationsRecursive(i, glm::mat4(1.0f));
 		}
-	}
-
-	if (modelCenter != glm::vec3(-1.0f)) // = if using 3D model viewer, where model center is initialized
-	{
-		model = glm::mat4(1.0f);
-		model = glm::translate(model, modelCenter); // a trick to build the correct model matrix that rotates the model around its center
-		model = glm::rotate(model, glm::radians(meshPitch), glm::vec3(1, 0, 0));
-		model = glm::rotate(model, glm::radians(meshYaw), glm::vec3(0, 1, 0));
-		model = glm::translate(model, -modelCenter);
 	}
 
 	shader.use();
@@ -153,7 +159,7 @@ void Model::draw(glm::mat4 model, glm::mat4 view, glm::mat4 projection, glm::vec
 		glBindVertexArray(0);
 
 		// render nodes (only in simple mode)
-		if (!nodes.empty())
+		if (!nodes.empty() && !isTerrainViewer)
 		{
 			defaultShader.use();
 			defaultShader.setMat4("projection", projection);
