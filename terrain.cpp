@@ -498,7 +498,7 @@ void Terrain::getTerrainVertices()
 
 				glGenTextures(1, &tile->textureMap);
 				glBindTexture(GL_TEXTURE_2D_ARRAY, tile->textureMap);
-				glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, GL_RGBA8, TERRAIN_TEXTURE_RESOLUTION, TERRAIN_TEXTURE_RESOLUTION, tileTextureCount);
+				glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, TERRAIN_TEXTURE_RESOLUTION, TERRAIN_TEXTURE_RESOLUTION, tileTextureCount, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL); // [FIX] for Windows compatibility
 
 				for (int k = 0; k < tileTextureCount; k++)
 				{

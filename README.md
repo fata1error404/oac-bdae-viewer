@@ -189,12 +189,19 @@ __How to compile from source?__
 2. Download the source code.  
 `git clone git@github.com:fata1error404/oac-bdae-viewer.git`
 3. Install dependencies.  
+For Windows:  
+[MSYS2](https://www.msys2.org/) which will give you terminal environment and Unix-like subsystem.  
+Open MSYS2MINGW64 as administrator and run  
+`pacman -S mingw-w64-x86_64-make` – MinGW build tools  
+`pacman -S mingw-w64-x86_64-gcc` – MinGW relies on gcc for compilation  
+`nano ~/.bashrc`  
+`alias make='mingw32-make'` (add this line to .bashrc file and save)  
+`source ~/.bashrc`  
+$\quad$  
 For Linux:  
 `sudo apt-get install mesa-common-dev`
  –  core OpenGL utilities development headers  
 `sudo apt-get install libglfw3-dev libglm-dev` – necessary development libraries (GLFW for handling windowing and input, GLM for OpenGL-style mathematics)  
-For Windows:  
-[TODO]
 4. Compile and launch (same for Windows and Linux).  
 `make`  
 `./app`
