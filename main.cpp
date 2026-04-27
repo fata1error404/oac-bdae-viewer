@@ -345,8 +345,8 @@ int main()
 
 			// ImGui::Checkbox("Walkable (N)", &displayNavMesh);
 			// ImGui::Spacing();
-			// ImGui::Checkbox("Physics (M)", &displayPhysics);
-			// ImGui::Spacing();
+			ImGui::Checkbox("Physics (M)", &displayPhysics);
+			ImGui::Spacing();
 
 			ImGui::Checkbox("Lighting (L)", &ourLight.showLighting);
 			ImGui::NewLine();

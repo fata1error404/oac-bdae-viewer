@@ -80,7 +80,7 @@ class Terrain
 	//! Builds flat water surface vertex data for each terrain chunk that contains water (water is defined and rendered per chunk, not per unit).
 	void getWaterVertices();
 
-	// void getPhysicsVertices();
+	void getPhysicsVertices();
 
 	// void getNavigationVertices(dtNavMesh *navMesh);
 

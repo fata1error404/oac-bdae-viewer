@@ -118,7 +118,7 @@ void Terrain::load(const char *fpath, Sound &sound)
 
 	getWaterVertices();
 
-	// getPhysicsVertices();
+	getPhysicsVertices();
 
 	// getNavigationVertices(navMesh);
 
@@ -787,255 +787,153 @@ void Terrain::getWaterVertices()
 	}
 */
 
-/*
-	void Terrain::getPhysicsVertices()
+void Terrain::getPhysicsVertices()
+{
+	for (int i = 0; i < tilesX; i++)
 	{
-		for (int i = 0; i < tilesX; i++)
+		for (int j = 0; j < tilesZ; j++)
 		{
-			for (int j = 0; j < tilesZ; j++)
+			TileTerrain *tile = tiles[i][j];
+
+			if (!tile || tile->physicsGeometry.empty())
+				continue;
+
+			for (Physics *headGeom : tile->physicsGeometry)
 			{
-				TileTerrain *tile = tiles[i][j];
-
-				if (!tile || tile->physicsGeometry.empty())
-					continue;
-
-				for (Physics *headGeom : tile->physicsGeometry)
+				for (Physics *geom = headGeom; geom; geom = geom->pNext)
 				{
-					for (Physics *geom = headGeom; geom; geom = geom->pNext)
+					int type = geom->geometryType;
+
+					if (type == PHYSICS_GEOM_TYPE_BOX)
 					{
-						int type = geom->geometryType;
+						VEC3 &h = geom->halfSize;
 
-						if (type == PHYSICS_GEOM_TYPE_BOX)
+						VEC3 v[8] = {
+							{-h.X, +h.Y, -h.Z},
+							{+h.X, +h.Y, -h.Z},
+							{+h.X, -h.Y, -h.Z},
+							{-h.X, -h.Y, -h.Z},
+							{-h.X, +h.Y, +h.Z},
+							{+h.X, +h.Y, +h.Z},
+							{+h.X, -h.Y, +h.Z},
+							{-h.X, -h.Y, +h.Z}};
+
+						for (VEC3 &vv : v)
+							geom->model.transformVect(vv);
+
+						int F[6][4] = {
+							{0, 1, 2, 3},
+							{5, 4, 7, 6},
+							{0, 3, 7, 4},
+							{1, 5, 6, 2},
+							{0, 4, 5, 1},
+							{3, 2, 6, 7}};
+
+						for (int f = 0; f < 6; f++)
 						{
-							VEC3 &h = geom->halfSize;
-							VEC3 v[8] = {
-								{-h.X, +h.Y, -h.Z}, {+h.X, +h.Y, -h.Z}, {+h.X, -h.Y, -h.Z}, {-h.X, -h.Y, -h.Z}, {-h.X, +h.Y, +h.Z}, {+h.X, +h.Y, +h.Z}, {+h.X, -h.Y, +h.Z}, {-h.X, -h.Y, +h.Z}};
-							for (auto &vv : v)
-								geom->model.transformVect(vv);
-							int F[6][4] = {
-								{0, 1, 2, 3}, {5, 4, 7, 6}, {0, 3, 7, 4}, {1, 5, 6, 2}, {0, 4, 5, 1}, {3, 2, 6, 7}};
-							for (int f = 0; f < 6; ++f)
-							{
-								int a = F[f][0], b = F[f][1], c = F[f][2], d = F[f][3];
-								tile->physicsVertices.insert(tile->physicsVertices.end(), {v[a].X, v[a].Y, v[a].Z, v[b].X, v[b].Y, v[b].Z, v[c].X, v[c].Y, v[c].Z,
-																						v[a].X, v[a].Y, v[a].Z, v[c].X, v[c].Y, v[c].Z, v[d].X, v[d].Y, v[d].Z});
-							}
+							int a = F[f][0], b = F[f][1], c = F[f][2], d = F[f][3];
+							tile->physicsVertices.insert(tile->physicsVertices.end(), {v[a].X, v[a].Y, v[a].Z, v[b].X, v[b].Y, v[b].Z, v[c].X, v[c].Y, v[c].Z,
+																					   v[a].X, v[a].Y, v[a].Z, v[c].X, v[c].Y, v[c].Z, v[d].X, v[d].Y, v[d].Z});
 						}
-						else if (type == PHYSICS_GEOM_TYPE_CYLINDER)
+					}
+					else if (type == PHYSICS_GEOM_TYPE_CYLINDER)
+					{
+						const int CUT_NUM = 16;
+						const float pi = 3.14159265359f;
+						float angle_step = 2.0f * pi / CUT_NUM;
+						float radius = geom->halfSize.X;
+						float height = geom->halfSize.Y;
+
+						int myoffset = 0.0f;
+
+						VEC3 centerBottom(myoffset, -height, -myoffset);
+						VEC3 centerTop(myoffset, height, -myoffset);
+						geom->model.transformVect(centerBottom);
+						geom->model.transformVect(centerTop);
+
+						for (int s = 0; s < CUT_NUM; s++)
 						{
-							const int CUT_NUM = 16;
-							const float pi = 3.14159265359f;
-							float angle_step = 2.0f * pi / CUT_NUM;
-							float radius = geom->halfSize.X;
-							float height = geom->halfSize.Y;
+							float angle0 = s * angle_step;
+							float angle1 = (s + 1) * angle_step;
 
-							int myoffset = 0.5 * radius;
+							float x0 = radius * cosf(angle0) + myoffset, z0 = radius * sinf(angle0) - myoffset;
+							float x1 = radius * cosf(angle1) + myoffset, z1 = radius * sinf(angle1) - myoffset;
 
-							VEC3 centerBottom(myoffset, -height, -myoffset);
-							VEC3 centerTop(myoffset, height, -myoffset);
-							geom->model.transformVect(centerBottom);
-							geom->model.transformVect(centerTop);
+							VEC3 b0(x0, -height, z0);
+							VEC3 b1(x1, -height, z1);
+							VEC3 t0(x0, +height, z0);
+							VEC3 t1(x1, +height, z1);
 
-							for (int s = 0; s < CUT_NUM; s++)
-							{
-								float angle0 = s * angle_step;
-								float angle1 = (s + 1) * angle_step;
+							geom->model.transformVect(b0);
+							geom->model.transformVect(b1);
+							geom->model.transformVect(t0);
+							geom->model.transformVect(t1);
 
-								float x0 = radius * cosf(angle0) + myoffset, z0 = radius * sinf(angle0) - myoffset;
-								float x1 = radius * cosf(angle1) + myoffset, z1 = radius * sinf(angle1) - myoffset;
+							tile->physicsVertices.insert(tile->physicsVertices.end(), {b1.X, b1.Y, b1.Z,
+																					   b0.X, b0.Y, b0.Z,
+																					   centerBottom.X, centerBottom.Y, centerBottom.Z});
 
-								VEC3 b0(x0, -height, z0);
-								VEC3 b1(x1, -height, z1);
-								VEC3 t0(x0, +height, z0);
-								VEC3 t1(x1, +height, z1);
+							tile->physicsVertices.insert(tile->physicsVertices.end(), {t0.X, t0.Y, t0.Z,
+																					   t1.X, t1.Y, t1.Z,
+																					   centerTop.X, centerTop.Y, centerTop.Z});
 
-								geom->model.transformVect(b0);
-								geom->model.transformVect(b1);
-								geom->model.transformVect(t0);
-								geom->model.transformVect(t1);
+							tile->physicsVertices.insert(tile->physicsVertices.end(), {b0.X, b0.Y, b0.Z,
+																					   t0.X, t0.Y, t0.Z,
+																					   t1.X, t1.Y, t1.Z});
 
-								tile->physicsVertices.insert(tile->physicsVertices.end(), {b1.X, b1.Y, b1.Z,
-																						b0.X, b0.Y, b0.Z,
-																						centerBottom.X, centerBottom.Y, centerBottom.Z});
-
-								tile->physicsVertices.insert(tile->physicsVertices.end(), {t0.X, t0.Y, t0.Z,
-																						t1.X, t1.Y, t1.Z,
-																						centerTop.X, centerTop.Y, centerTop.Z});
-
-								tile->physicsVertices.insert(tile->physicsVertices.end(), {b0.X, b0.Y, b0.Z,
-																						t0.X, t0.Y, t0.Z,
-																						t1.X, t1.Y, t1.Z});
-
-								tile->physicsVertices.insert(tile->physicsVertices.end(), {b0.X, b0.Y, b0.Z,
-																						t1.X, t1.Y, t1.Z,
-																						b1.X, b1.Y, b1.Z});
-							}
+							tile->physicsVertices.insert(tile->physicsVertices.end(), {b0.X, b0.Y, b0.Z,
+																					   t1.X, t1.Y, t1.Z,
+																					   b1.X, b1.Y, b1.Z});
 						}
-						else if (type == PHYSICS_GEOM_TYPE_MESH)
-						{
-							const auto *facePtr = geom->mesh ? &geom->mesh->second : nullptr;
-							const auto *vertPtr = geom->mesh ? &geom->mesh->first : nullptr;
+					}
+					else if (type == PHYSICS_GEOM_TYPE_MESH)
+					{
+						const auto *facePtr = geom->mesh ? &geom->mesh->second : nullptr;
+						const auto *vertPtr = geom->mesh ? &geom->mesh->first : nullptr;
 
-							if (!facePtr || !vertPtr || facePtr->empty() || vertPtr->empty())
+						if (!facePtr || !vertPtr || facePtr->empty() || vertPtr->empty())
+							continue;
+
+						const float RENDER_H_OFF = 0.10f;
+						int F = static_cast<int>(facePtr->size() / PHYSICS_FACE_SIZE);
+						const auto &face = *facePtr;
+						const auto &vert = *vertPtr;
+
+						for (int f = 0; f < F; ++f)
+						{
+							int a = face[4 * f];
+							int b = face[4 * f + 1];
+							int c = face[4 * f + 2];
+
+							// guard against bad indices
+							if ((3 * a + 2) >= (int)vert.size() || (3 * b + 2) >= (int)vert.size() || (3 * c + 2) >= (int)vert.size())
 								continue;
 
-							const float RENDER_H_OFF = 0.10f;
-							int F = static_cast<int>(facePtr->size() / PHYSICS_FACE_SIZE);
-							const auto &face = *facePtr;
-							const auto &vert = *vertPtr;
+							VEC3 v0(vert[3 * a], vert[3 * a + 1] + RENDER_H_OFF, -vert[3 * a + 2]);
+							VEC3 v1(vert[3 * b], vert[3 * b + 1] + RENDER_H_OFF, -vert[3 * b + 2]);
+							VEC3 v2(vert[3 * c], vert[3 * c + 1] + RENDER_H_OFF, -vert[3 * c + 2]);
 
-							for (int f = 0; f < F; ++f)
-							{
-								int a = face[4 * f];
-								int b = face[4 * f + 1];
-								int c = face[4 * f + 2];
+							geom->model.transformVect(v0);
+							geom->model.transformVect(v1);
+							geom->model.transformVect(v2);
 
-								// guard against bad indices
-								if ((3 * a + 2) >= (int)vert.size() || (3 * b + 2) >= (int)vert.size() || (3 * c + 2) >= (int)vert.size())
-									continue;
-
-								VEC3 v0(vert[3 * a], vert[3 * a + 1] + RENDER_H_OFF, -vert[3 * a + 2]);
-								VEC3 v1(vert[3 * b], vert[3 * b + 1] + RENDER_H_OFF, -vert[3 * b + 2]);
-								VEC3 v2(vert[3 * c], vert[3 * c + 1] + RENDER_H_OFF, -vert[3 * c + 2]);
-
-								geom->model.transformVect(v0);
-								geom->model.transformVect(v1);
-								geom->model.transformVect(v2);
-
-								tile->physicsVertices.insert(tile->physicsVertices.end(), {v0.X, v0.Y, v0.Z,
-																						v2.X, v2.Y, v2.Z,
-																						v1.X, v1.Y, v1.Z});
-							}
+							tile->physicsVertices.insert(tile->physicsVertices.end(), {v0.X, v0.Y, v0.Z,
+																					   v2.X, v2.Y, v2.Z,
+																					   v1.X, v1.Y, v1.Z});
 						}
 					}
 				}
-				tile->physicsVertexCount = tile->physicsVertices.size() / 3;
 			}
+
+			tile->physicsVertexCount = tile->physicsVertices.size() / 3;
+
+			for (Physics *p : tile->physicsGeometry)
+				delete p;
+
+			tile->physicsGeometry.clear();
 		}
-
-		for (int i = 0; i < tilesX; i++)
-			for (int j = 0; j < tilesZ; j++)
-			{
-				if (!tiles[i][j] || tiles[i][j]->physicsGeometry.empty())
-					continue;
-
-				TileTerrain *tile = tiles[i][j];
-
-				for (Physics *headGeom : tile->physicsGeometry)
-				{
-					for (Physics *geom = headGeom; geom; geom = geom->pNext)
-					{
-						int type = geom->geometryType;
-						if (type == PHYSICS_GEOM_TYPE_BOX)
-						{
-							VEC3 &h = geom->halfSize;
-							VEC3 v[8] = {
-								{-h.X, +h.Y, -h.Z}, {+h.X, +h.Y, -h.Z}, {+h.X, -h.Y, -h.Z}, {-h.X, -h.Y, -h.Z}, {-h.X, +h.Y, +h.Z}, {+h.X, +h.Y, +h.Z}, {+h.X, -h.Y, +h.Z}, {-h.X, -h.Y, +h.Z}};
-							for (auto &vv : v)
-								geom->model.transformVect(vv);
-							int E[12][2] = {
-								{0, 1}, {1, 2}, {2, 3}, {3, 0}, {4, 5}, {5, 6}, {6, 7}, {7, 4}, {0, 4}, {1, 5}, {2, 6}, {3, 7}};
-							for (auto &e : E)
-							{
-								tile->physicsVertices.insert(tile->physicsVertices.end(), {v[e[0]].X, v[e[0]].Y, v[e[0]].Z,
-																						v[e[1]].X, v[e[1]].Y, v[e[1]].Z});
-							}
-						}
-						else if (type == PHYSICS_GEOM_TYPE_CYLINDER)
-						{
-							const int CUT_NUM = 16;
-							const float pi = 3.14159265359f;
-							float angle_step = 2.0f * pi / CUT_NUM;
-							float radius = geom->halfSize.X;
-							float height = geom->halfSize.Y;
-
-							int myoffset = 0.5 * radius;
-
-							VEC3 centerBottom(myoffset, -height, -myoffset);
-							VEC3 centerTop(myoffset, height, -myoffset);
-							geom->model.transformVect(centerBottom);
-							geom->model.transformVect(centerTop);
-
-							for (int s = 0; s < CUT_NUM; s++)
-							{
-								float angle0 = s * angle_step;
-								float angle1 = (s + 1) * angle_step;
-
-								float x0 = radius * cosf(angle0) + myoffset, z0 = radius * sinf(angle0) - myoffset;
-								float x1 = radius * cosf(angle1) + myoffset, z1 = radius * sinf(angle1) - myoffset;
-
-								VEC3 b0(x0, -height, z0);
-								VEC3 t0(x0, height, z0);
-								VEC3 b1(x1, -height, z1);
-								VEC3 t1(x1, height, z1);
-
-								geom->model.transformVect(b0);
-								geom->model.transformVect(t0);
-								geom->model.transformVect(b1);
-								geom->model.transformVect(t1);
-
-								tile->physicsVertices.insert(tile->physicsVertices.end(), {b1.X, b1.Y, b1.Z,
-																						b0.X, b0.Y, b0.Z,
-																						centerBottom.X, centerBottom.Y, centerBottom.Z});
-
-								tile->physicsVertices.insert(tile->physicsVertices.end(), {b0.X, b0.Y, b0.Z,
-																						t1.X, t1.Y, t1.Z,
-																						b1.X, b1.Y, b1.Z});
-
-								tile->physicsVertices.insert(tile->physicsVertices.end(), {b0.X, b0.Y, b0.Z,
-																						t0.X, t0.Y, t0.Z,
-																						t1.X, t1.Y, t1.Z});
-
-								tile->physicsVertices.insert(tile->physicsVertices.end(), {t0.X, t0.Y, t0.Z,
-																						t1.X, t1.Y, t1.Z,
-																						centerTop.X, centerTop.Y, centerTop.Z});
-							}
-						}
-						else if (type == PHYSICS_GEOM_TYPE_MESH)
-						{
-							const auto *facePtr = geom->mesh ? &geom->mesh->second : nullptr;
-							const auto *vertPtr = geom->mesh ? &geom->mesh->first : nullptr;
-
-							if (!facePtr || !vertPtr || facePtr->empty() || vertPtr->empty())
-								continue;
-
-							const float RENDER_H_OFF = 0.10f;
-							int F = static_cast<int>(facePtr->size() / PHYSICS_FACE_SIZE);
-							const auto &face = *facePtr;
-							const auto &vert = *vertPtr;
-
-							for (int f = 0; f < F; ++f)
-							{
-								int a = face[4 * f];
-								int b = face[4 * f + 1];
-								int c = face[4 * f + 2];
-
-								if ((3 * a + 2) >= (int)vert.size() || (3 * b + 2) >= (int)vert.size() || (3 * c + 2) >= (int)vert.size())
-									continue;
-
-								VEC3 v0(vert[3 * a], vert[3 * a + 1] + RENDER_H_OFF, -vert[3 * a + 2]);
-								VEC3 v1(vert[3 * b], vert[3 * b + 1] + RENDER_H_OFF, -vert[3 * b + 2]);
-								VEC3 v2(vert[3 * c], vert[3 * c + 1] + RENDER_H_OFF, -vert[3 * c + 2]);
-
-								geom->model.transformVect(v0);
-								geom->model.transformVect(v1);
-								geom->model.transformVect(v2);
-
-								tile->physicsVertices.insert(tile->physicsVertices.end(), {v0.X, v0.Y, v0.Z, v2.X, v2.Y, v2.Z,
-																						v2.X, v2.Y, v2.Z, v1.X, v1.Y, v1.Z,
-																						v1.X, v1.Y, v1.Z, v0.X, v0.Y, v0.Z});
-							}
-						}
-					}
-				}
-
-				for (Physics *p : tile->physicsGeometry)
-					delete p;
-
-				tile->physicsGeometry.clear();
-			}
 	}
-*/
+}
 
 //! Uploads tile to GPU (GPU-side tile loading, called per-frame for all tiles that need to be activated).
 void Terrain::activateTile(TileTerrain *tile)
@@ -1500,32 +1398,32 @@ void Terrain::draw(glm::mat4 view, glm::mat4 projection, bool simple, bool rende
 				glBindVertexArray(0);
 			}
 		}
-
-		// render physics
-		if (renderPhysics)
-		{
-			for (TileTerrain *tile : tilesVisible)
-			{
-				if (!tile)
-					continue;
-
-				if (tile->phyVAO == 0 || tile->phyVBO == 0)
-					continue;
-
-				glBindVertexArray(tile->phyVAO);
-
-				shader.setInt("renderMode", 4);
-				glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-				glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
-
-				shader.setInt("renderMode", 2);
-				glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-				glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
-
-				glBindVertexArray(0);
-			}
-		}
 	*/
+
+	// render physics
+	if (renderPhysics)
+	{
+		for (TileTerrain *tile : tilesVisible)
+		{
+			if (!tile)
+				continue;
+
+			if (tile->phyVAO == 0 || tile->phyVBO == 0)
+				continue;
+
+			glBindVertexArray(tile->phyVAO);
+
+			shader.setInt("renderMode", 4);
+			glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+			glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
+
+			shader.setInt("renderMode", 2);
+			glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+			glDrawArrays(GL_TRIANGLES, 0, tile->physicsVertexCount);
+
+			glBindVertexArray(0);
+		}
+	}
 
 	// render water and 3D models
 	for (TileTerrain *tile : tilesVisible)

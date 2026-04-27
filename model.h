@@ -13,7 +13,7 @@
 #include "light.h"
 
 // if defined, viewer prints detailed model info in terminal
-#define CONSOLE_DEBUG_LOG
+// #define CONSOLE_DEBUG_LOG
 
 template <typename... Args>
 inline void LOG(Args &&...args)

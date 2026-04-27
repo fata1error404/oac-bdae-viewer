@@ -39,6 +39,7 @@ class Physics
 
 	// values read from .phy file
 	int geometryType;
+	float yaw;	   // local horizontal rotation (left / right)
 	VEC3 position; // local translation
 	VEC3 halfSize; // local 0.5 width, height and length
 
@@ -46,8 +47,9 @@ class Physics
 
 	Physics *pNext; // pointer to next submesh within a single physics model
 
-	Physics(VEC3 pos, float halfW, float halfH, float halfL, int type)
-		: position(pos),
+	Physics(float rotY, VEC3 pos, float halfW, float halfH, float halfL, int type)
+		: yaw(rotY),
+		  position(pos),
 		  halfSize(halfW, halfH, halfL),
 		  geometryType(type),
 		  pNext(NULL) {}
@@ -122,7 +124,7 @@ class Physics
 					offset += vertexCount * 3 * sizeof(float);
 					offset += faceCount * PHYSICS_FACE_SIZE * sizeof(short);
 
-					node = new Physics(pos, hx, hy, hz, PHYSICS_GEOM_TYPE_MESH);
+					node = new Physics(0.0f, pos, hx, hy, hz, PHYSICS_GEOM_TYPE_MESH);
 					node->mesh = it->second;
 				}
 				else // not cached — build vertex data and insert to cache on success
@@ -153,7 +155,7 @@ class Physics
 						indices.push_back(v);
 					}
 
-					node = new Physics(pos, hx, hy, hz, PHYSICS_GEOM_TYPE_MESH); // create new physics mesh object
+					node = new Physics(0.0f, pos, hx, hy, hz, PHYSICS_GEOM_TYPE_MESH); // create new physics mesh object
 
 					node->mesh = std::make_shared<std::pair<std::vector<float>, std::vector<unsigned short>>>(std::move(vertices), std::move(indices)); // init shared pointer for vertex data (we share only vertices and indices, but not Physics objects! move vectors, no extra copy)
 
@@ -167,23 +169,24 @@ class Physics
 			{
 				GeometryInfo geom;
 				memcpy(&geom, buffer + offset, sizeof(GeometryInfo));
-				VEC3 pos(geom.transX, geom.transY, geom.transZ);
+				VEC3 pos(geom.transX, geom.transZ, geom.transY);
+				float ry = geom.rotY;
 				float hx = geom.halfSizeX;
-				float hy = geom.halfSizeY;
-				float hz = geom.halfSizeZ;
+				float hy = geom.halfSizeZ;
+				float hz = geom.halfSizeY;
 
 				offset += sizeof(GeometryInfo);
 
 				switch (type)
 				{
 				case PHYSICS_GEOM_TYPE_PLANE:
-					node = new Physics(pos, hx, hy, 0.0f, PHYSICS_GEOM_TYPE_PLANE);
+					node = new Physics(ry, pos, hx, hy, 0.0f, PHYSICS_GEOM_TYPE_PLANE);
 					break;
 				case PHYSICS_GEOM_TYPE_BOX:
-					node = new Physics(pos, hx, hy, hz, PHYSICS_GEOM_TYPE_BOX);
+					node = new Physics(ry, pos, hx, hy, hz, PHYSICS_GEOM_TYPE_BOX);
 					break;
 				case PHYSICS_GEOM_TYPE_CYLINDER:
-					node = new Physics(pos, hx, hy, hz, PHYSICS_GEOM_TYPE_CYLINDER);
+					node = new Physics(ry, pos, hx, hy, hz, PHYSICS_GEOM_TYPE_CYLINDER);
 					break;
 				default:
 					std::cout << "[Debug] Physics::load: unknown physics geometry type " << type << std::endl;
