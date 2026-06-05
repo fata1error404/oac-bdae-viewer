@@ -80,6 +80,12 @@ class Camera
 	// constructor that initializes camera orientation vectors
 	Camera()
 	{
+		Reset();
+	}
+
+	//! Restores the camera to the default state.
+	void Reset()
+	{
 		Position = STARTPOS;
 		WorldUp = WORLDUP;
 		Pitch = PITCH;

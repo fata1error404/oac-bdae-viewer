@@ -268,6 +268,13 @@ int main()
 		// if a model is loaded, show its info and settings
 		if (bdaeModel.modelLoaded && !isTerrainViewer)
 		{
+			if (ImGui::Button("Reset Camera"))
+			{
+				bdaeModel.meshPitch = 0.0f;
+				bdaeModel.meshYaw = 0.0f;
+				ourCamera.Reset();
+			}
+
 			ImGui::Spacing();
 			ImGui::TextWrapped("File:\xC2\xA0%s", bdaeModel.fileName.c_str());
 			ImGui::Text("Size: %d Bytes", bdaeModel.fileSize);
