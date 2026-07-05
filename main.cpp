@@ -30,6 +30,7 @@ void scroll_callback(GLFWwindow *window, double xoffset, double yoffset);
 void mouse_callback(GLFWwindow *window, double xpos, double ypos);
 void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods);
 void processInput(GLFWwindow *window);
+ImVec2 worldToScreen(glm::vec3 worldPos, const glm::mat4 &view, const glm::mat4 &projection);
 
 // window settings
 bool isFullscreen = false;
@@ -65,6 +66,8 @@ bool displayBaseMesh = false;	   // flag that indicates base / textured mesh dis
 bool displayNavMesh = false;	   // flag that indicates whether to show walkable surfaces
 bool displayPhysics = false;	   // flag that indicates whether to show physical surfaces
 bool isTerrainViewer = false;
+
+const float axisLength = 2.0f;
 
 int main()
 {
@@ -174,6 +177,27 @@ int main()
 	Model bdaeModel("shaders/model.vs", "shaders/model.fs");
 
 	Terrain terrainModel(ourCamera, ourLight);
+
+	Shader coordinateAxis("shaders/default.vs", "shaders/default.fs");
+
+	coordinateAxis.use();
+	coordinateAxis.setMat4("model", glm::mat4(1.0f));
+
+	unsigned int axisVAO, axisVBO;
+
+	float axisVertices[] = {
+		0.0f, 0.0f, 0.0f, axisLength, 0.0f, 0.0f, // +X
+		0.0f, 0.0f, 0.0f, 0.0f, axisLength, 0.0f, // +Y
+		0.0f, 0.0f, 0.0f, 0.0f, 0.0f, axisLength  // +Z
+	};
+
+	glGenVertexArrays(1, &axisVAO);
+	glGenBuffers(1, &axisVBO);
+	glBindVertexArray(axisVAO);
+	glBindBuffer(GL_ARRAY_BUFFER, axisVBO);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(axisVertices), axisVertices, GL_STATIC_DRAW);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
+	glEnableVertexAttribArray(0);
 
 	AppContext appContext;
 	appContext.model = &bdaeModel;
@@ -391,6 +415,41 @@ int main()
 			bdaeModel.draw(glm::mat4(1.0f), view, projection, ourCamera.Position, deltaTime, ourLight.showLighting, displayBaseMesh); // render model
 
 			ourLight.draw(view, projection); // render light cube
+
+			// render coordinate axis
+			if (displayBaseMesh)
+			{
+				coordinateAxis.use();
+				coordinateAxis.setMat4("view", view);
+				coordinateAxis.setMat4("projection", projection);
+
+				glBindVertexArray(axisVAO);
+				glLineWidth(2.0f);
+
+				coordinateAxis.setVec3("color", glm::vec3(1.0f, 0.0f, 0.0f));
+				glDrawArrays(GL_LINES, 0, 2);
+
+				coordinateAxis.setVec3("color", glm::vec3(0.0f, 1.0f, 0.0f));
+				glDrawArrays(GL_LINES, 2, 2);
+
+				coordinateAxis.setVec3("color", glm::vec3(0.0f, 0.0f, 1.0f));
+				glDrawArrays(GL_LINES, 4, 2);
+
+				glLineWidth(1.0f);
+				glBindVertexArray(0);
+
+				ImDrawList *drawList = ImGui::GetBackgroundDrawList();
+				ImVec2 labelPos;
+
+				labelPos = worldToScreen(glm::vec3(axisLength, 0.0f, 0.0f), view, projection);
+				drawList->AddText(ImVec2(labelPos.x + 4.0f, labelPos.y - 4.0f), IM_COL32(0, 0, 0, 255), "X");
+
+				labelPos = worldToScreen(glm::vec3(0.0f, axisLength, 0.0f), view, projection);
+				drawList->AddText(ImVec2(labelPos.x + 4.0f, labelPos.y - 4.0f), IM_COL32(0, 0, 0, 255), "Y");
+
+				labelPos = worldToScreen(glm::vec3(0.0f, 0.0f, axisLength), view, projection);
+				drawList->AddText(ImVec2(labelPos.x + 4.0f, labelPos.y - 4.0f), IM_COL32(0, 0, 0, 255), "Z");
+			}
 		}
 		else if (terrainModel.terrainLoaded)
 			terrainModel.draw(view, projection, displayBaseMesh, displayNavMesh, displayPhysics, deltaTime); // render terrain
@@ -542,4 +601,16 @@ void processInput(GLFWwindow *window)
 		ourCamera.ProcessKeyboard(RIGHT);
 
 	ourCamera.UpdatePosition(deltaTime);
+}
+
+// project a 3D point from world space coordinates into 2D screen coordinates (for rendering text overlays)
+ImVec2 worldToScreen(glm::vec3 worldPos, const glm::mat4 &view, const glm::mat4 &projection)
+{
+	glm::vec4 pos = projection * view * glm::vec4(worldPos, 1.0f); // convert to clip space
+	pos /= pos.w;												   // convert to NDC (perspective division)
+
+	// map NDC from [-1, 1] to [0, 1] and scale by the current window dimensions
+	return ImVec2(
+		(pos.x * 0.5f + 0.5f) * currentWindowWidth,
+		(0.5f - pos.y * 0.5f) * currentWindowHeight);
 }
