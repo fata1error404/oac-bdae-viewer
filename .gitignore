@@ -10,6 +10,7 @@ tools/valgrind.supp
 
 tools/generated_puppy_dragon.bdae
 tools/puppy_dragon.bdae
+tools/dragon
 tools/example.dae
 tools/example.bdae
 

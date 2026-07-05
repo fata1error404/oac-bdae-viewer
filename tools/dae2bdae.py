@@ -80,6 +80,9 @@ class Scene:
     material_to_texture: Dict[str, str]
     skins: List[Skin] = field(default_factory=list)
     root_nodes: List[Node] = field(default_factory=list)
+    extra_strings: List[str] = field(default_factory=list)
+    node_tree_id: str = "VisualSceneNode"
+    node_tree_name: str = "VisualSceneNode"
 
 
 class StringTable:
@@ -93,6 +96,9 @@ class StringTable:
             self._items.append(value)
         return self._offsets[value]
 
+    def add_duplicate(self, value: str) -> None:
+        self._items.append(value)
+
     def build(self, start_offset: int) -> Tuple[bytes, Dict[str, int]]:
         out = bytearray()
         offsets: Dict[str, int] = {}
@@ -100,7 +106,8 @@ class StringTable:
         for value in self._items:
             encoded = value.encode("utf-8")
             out += u32(len(encoded))
-            offsets[value] = start_offset + len(out)
+            if value not in offsets:
+                offsets[value] = start_offset + len(out)
             out += encoded
 
             # The engine string table stores enough padding for a trailing NUL
@@ -130,6 +137,13 @@ class BinaryBuilder:
 
     def patch(self, offset: int, blob: bytes) -> None:
         self.data[offset : offset + len(blob)] = blob
+
+
+@dataclass
+class PendingRemovableChunk:
+    type_id: int
+    payload: bytearray
+    offset_patches: List[Tuple[int, int]] = field(default_factory=list)
 
 
 def u16(value: int) -> bytes:
@@ -495,6 +509,122 @@ def parse_visual_scene(root: ET.Element) -> List[Node]:
     return [parse_node(node_elem) for node_elem in children(visual_scene, "node")]
 
 
+def visual_scene_metadata(root: ET.Element) -> Tuple[str, str]:
+    scene = child(root, "scene")
+    visual_scene_id = ""
+
+    if scene is not None:
+        instance_visual_scene = child(scene, "instance_visual_scene")
+        if instance_visual_scene is not None:
+            visual_scene_id = clean_id(instance_visual_scene.attrib.get("url", ""))
+
+    for candidate in all_desc(root, "visual_scene"):
+        if not visual_scene_id or candidate.attrib.get("id") == visual_scene_id:
+            node_tree_id = candidate.attrib.get("id", "VisualSceneNode")
+            node_tree_name = candidate.attrib.get("name", node_tree_id)
+            return node_tree_id, node_tree_name
+
+    return "VisualSceneNode", "VisualSceneNode"
+
+
+def legacy_reference_strings(root: ET.Element) -> List[str]:
+    values: List[str] = []
+
+    def add(value: Optional[str]) -> None:
+        if value is not None:
+            values.append(value.strip())
+
+    def add_url(value: Optional[str]) -> None:
+        if not value:
+            return
+        url = value.strip()
+        if "#" in url and not url.startswith("#"):
+            before, after = url.split("#", 1)
+            add(before)
+            add(f"#{after}")
+        else:
+            add(url)
+
+    for image in all_desc(root, "image"):
+        add(image.attrib.get("id"))
+        add(image.attrib.get("name"))
+        init_from = child(image, "init_from")
+        if init_from is not None and init_from.text:
+            add(Path(init_from.text.strip()).name)
+
+    for material in all_desc(root, "material"):
+        add(material.attrib.get("id") or material.attrib.get("name"))
+        instance_effect = child(material, "instance_effect")
+        if instance_effect is not None:
+            add_url(instance_effect.attrib.get("url"))
+
+    add("texture")
+    add("")
+    add("")
+
+    for setparam in all_desc(root, "setparam"):
+        ref = setparam.attrib.get("ref")
+        if ref and "CurrentTechnique" in ref:
+            add(ref)
+            string_value = child(setparam, "string")
+            add(string_value.text if string_value is not None else None)
+
+    for geometry in all_desc(root, "geometry"):
+        add(geometry.attrib.get("id"))
+        add(geometry.attrib.get("name"))
+
+    for controller in all_desc(root, "controller"):
+        add(controller.attrib.get("id"))
+        skin_elem = child(controller, "skin")
+        if skin_elem is not None:
+            add(skin_elem.attrib.get("source"))
+            for source in children(skin_elem, "source"):
+                if child(source, "Name_array") is not None:
+                    for bone_name in source_names(source):
+                        add(bone_name)
+                    break
+
+    node_tree_id, node_tree_name = visual_scene_metadata(root)
+    add(node_tree_id)
+    add(node_tree_name)
+
+    def add_node_and_instances(node_elem: ET.Element) -> None:
+        add(node_elem.attrib.get("id"))
+        add(node_elem.attrib.get("name"))
+        add(node_elem.attrib.get("sid"))
+
+        for child_node in children(node_elem, "node"):
+            add_node_and_instances(child_node)
+
+        for instance_camera in children(node_elem, "instance_camera"):
+            add_url(instance_camera.attrib.get("url"))
+        for instance_controller in children(node_elem, "instance_controller"):
+            add_url(instance_controller.attrib.get("url"))
+            for instance_material in all_desc(instance_controller, "instance_material"):
+                add_url(instance_material.attrib.get("target"))
+            for skeleton in all_desc(instance_controller, "skeleton"):
+                add_url(skeleton.text)
+        for instance_light in children(node_elem, "instance_light"):
+            add_url(instance_light.attrib.get("url"))
+
+    visual_scene = None
+    for candidate in all_desc(root, "visual_scene"):
+        if candidate.attrib.get("id") == node_tree_id:
+            visual_scene = candidate
+            break
+    if visual_scene is not None:
+        for node_elem in children(visual_scene, "node"):
+            add_node_and_instances(node_elem)
+
+    scene = child(root, "scene")
+    if scene is not None:
+        instance_visual_scene = child(scene, "instance_visual_scene")
+        if instance_visual_scene is not None:
+            add_url(instance_visual_scene.attrib.get("url"))
+
+    return values
+
+
 def collect_instance_transforms(nodes: Sequence[Node], root: ET.Element) -> Dict[str, Tuple[Vec3, Quat, Vec3]]:
     element_by_id = {elem.attrib.get("id", ""): elem for elem in all_desc(root, "node") if elem.attrib.get("id")}
     node_by_id: Dict[str, Node] = {}
@@ -628,7 +758,7 @@ def parse_mesh_geometry(geometry: ET.Element, material_to_texture: Dict[str, str
                 mesh.vertices.append(
                     Vertex(
                         position=(p[0], p[1], p[2]),
-                        normal=normalize((n[0], n[1], n[2])),
+                        normal=(n[0], n[1], n[2]),
                         uv=(uv[0], uv[1]),
                     )
                 )
@@ -653,6 +783,7 @@ def parse_dae(path: Path) -> Scene:
     root = ET.parse(path).getroot()
     material_to_texture = parse_material_textures(root)
     root_nodes = parse_visual_scene(root)
+    node_tree_id, node_tree_name = visual_scene_metadata(root)
     transforms = collect_instance_transforms(root_nodes, root)
     skins = parse_skins(root)
 
@@ -672,7 +803,15 @@ def parse_dae(path: Path) -> Scene:
     if not meshes:
         raise ValueError("no supported mesh geometry found")
 
-    return Scene(meshes=meshes, material_to_texture=material_to_texture, skins=skins, root_nodes=root_nodes)
+    return Scene(
+        meshes=meshes,
+        material_to_texture=material_to_texture,
+        skins=skins,
+        root_nodes=root_nodes,
+        extra_strings=legacy_reference_strings(root),
+        node_tree_id=node_tree_id,
+        node_tree_name=node_tree_name,
+    )
 
 
 def default_output_stem(path: Path) -> str:
@@ -701,12 +840,23 @@ def bounds(vertices: Sequence[Vertex]) -> Tuple[Vec3, Vec3]:
 
 def collect_strings(scene: Scene) -> StringTable:
     table = StringTable()
-    table.add("")
     table.add(BDAE_VERSION_STRING)
-    table.add("scene")
+
+    empty_seen = False
+    for value in scene.extra_strings:
+        if value == "":
+            if empty_seen:
+                table.add_duplicate(value)
+            else:
+                table.add(value)
+                empty_seen = True
+        else:
+            table.add(value)
+
     table.add("texture")
-    table.add("texture-surface")
-    table.add("unlit_textured_trans_solid")
+    table.add("unlit_textured_trans_solid.bdae")
+    table.add(scene.node_tree_id)
+    table.add(scene.node_tree_name)
 
     for texture in scene.material_to_texture.values():
         table.add(texture)
@@ -751,21 +901,128 @@ def material_texture_index(materials: Sequence[str], textures: Sequence[str], sc
         return 0
 
 
+def aligned_payload(payload: bytearray) -> bytearray:
+    while len(payload) % 4:
+        payload.append(0)
+    return payload
+
+
+def normalized_influences(vertex_influences: Sequence[Tuple[int, float]], max_influence: int) -> Tuple[List[int], List[float]]:
+    limited = sorted(vertex_influences, key=lambda item: item[1], reverse=True)[:max_influence]
+    weight_sum = sum(weight for _, weight in limited)
+    scale = (1.0 / weight_sum) if weight_sum else 0.0
+
+    bone_indices = [bone_index for bone_index, _ in limited]
+    weights = [weight * scale for _, weight in limited]
+    bone_indices += [0] * (4 - len(bone_indices))
+    weights += [0.0] * (max_influence - len(weights))
+    return bone_indices[:4], weights[:max_influence]
+
+
+def vertex_payload(mesh: Mesh) -> bytearray:
+    payload = bytearray()
+    for vertex in mesh.vertices:
+        payload += vec3(vertex.position) + vec3(vertex.normal) + vec2(vertex.uv)
+    return aligned_payload(payload)
+
+
+def index_payload(submesh: Submesh) -> bytearray:
+    payload = bytearray()
+    for index in submesh.indices:
+        payload += u16(index)
+    return aligned_payload(payload)
+
+
+def influence_payload(skin: Skin) -> bytearray:
+    payload = bytearray()
+    for vertex_influences in skin.influences:
+        bone_indices, weights = normalized_influences(vertex_influences, skin.max_influence)
+        payload += bytes(bone_indices)
+        for weight in weights:
+            payload += f32(weight)
+
+    entry_size = 4 + skin.max_influence * 4
+    data_count = len(skin.influences) * (skin.max_influence + 1)
+    payload += b"\0" * max(0, (data_count - len(skin.influences)) * entry_size)
+    return aligned_payload(payload)
+
+
+def optimized_skin_payload(skin: Skin) -> PendingRemovableChunk:
+    per_bone: List[List[Tuple[float, int]]] = [[] for _ in skin.bone_names]
+    for vertex_index, vertex_influences in enumerate(skin.influences):
+        bone_indices, weights = normalized_influences(vertex_influences, skin.max_influence)
+        for bone_index, weight in zip(bone_indices, weights):
+            if weight == 0.0 or bone_index >= len(per_bone):
+                continue
+            per_bone[bone_index].append((weight, vertex_index))
+
+    payload = bytearray()
+    patches: List[Tuple[int, int]] = []
+    child_payloads: List[bytearray] = []
+
+    for entries in per_bone:
+        payload += u32(len(entries))
+        patch_offset = len(payload)
+        payload += u32(0)
+
+        child = bytearray()
+        for weight, vertex_index in entries:
+            child += f32(weight) + u16(vertex_index) + u16(0)
+        child_payloads.append(aligned_payload(child))
+        patches.append((patch_offset, 0))
+
+    for index, child in enumerate(child_payloads):
+        child_offset = len(payload)
+        payload += child
+        patches[index] = (patches[index][0], child_offset)
+
+    return PendingRemovableChunk(2, aligned_payload(payload), patches)
+
+
 def build_inner_bdae(scene: Scene) -> bytes:
+    legacy_layout = bool(scene.skins)
     string_table = collect_strings(scene)
     header_size = 60
     offset_table_offset = header_size
-    offset_count = 0
-    string_table_offset = offset_table_offset
+    offset_count = 222 if scene.skins else 0
+    string_table_offset = offset_table_offset + offset_count * 4
     strings_blob, string_offsets = string_table.build(string_table_offset)
 
     b = BinaryBuilder()
     b.write(b"\0" * header_size)
+    b.write(b"\0" * (offset_count * 4))
     b.write(strings_blob)
     b.align(4)
+    removable_chunks: List[PendingRemovableChunk] = []
+    removable_offset_patches: List[Tuple[int, int]] = []
+
+    def add_removable(type_id: int, payload: bytearray, offset_patch: int) -> None:
+        removable_offset_patches.append((offset_patch, len(removable_chunks)))
+        removable_chunks.append(PendingRemovableChunk(type_id, aligned_payload(payload)))
+
+    def add_pending_removable(chunk: PendingRemovableChunk, offset_patch: int) -> None:
+        removable_offset_patches.append((offset_patch, len(removable_chunks)))
+        removable_chunks.append(chunk)
 
     model_info_offset = b.tell()
     model_info_patch = b.write(b"\0" * 188)
+
+    legacy_config_offset = 0
+    if legacy_layout:
+        legacy_config_offset = b.tell()
+        b.write(
+            u32(1)
+            + u32(0)
+            + u32(1)
+            + u32(legacy_config_offset + 16)
+            + u32(0x7FFFFFFF)
+            + u32(0x80000000)
+            + u32(1)
+            + u32(0)
+            + u32(0)
+            + u32(legacy_config_offset + 40)
+            + u32(0)
+        )
 
     textures: List[str] = []
     for material in scene.material_to_texture:
@@ -791,6 +1048,7 @@ def build_inner_bdae(scene: Scene) -> bytes:
 
     material_metadata_offset = b.tell()
     material_patch_positions: Dict[str, int] = {}
+    material_effect_name = "unlit_textured_trans_solid.bdae"
     for material in materials:
         mat_offset = string_offsets[material]
         material_patch_positions[material] = b.tell() + 20
@@ -798,7 +1056,7 @@ def build_inner_bdae(scene: Scene) -> bytes:
             u32(mat_offset)
             + u32(mat_offset)
             + u32(0)
-            + u32(string_offsets["unlit_textured_trans_solid"])
+            + u32(string_offsets[material_effect_name])
             + u32(1)
             + u32(0)
             + u32(0)
@@ -824,6 +1082,9 @@ def build_inner_bdae(scene: Scene) -> bytes:
             + u32(texture_index)
         )
 
+    if legacy_layout:
+        b.write(b"\0" * 40)
+
     mesh_metadata_offset = b.tell()
     mesh_data_patches: List[int] = []
     for mesh in scene.meshes:
@@ -836,7 +1097,7 @@ def build_inner_bdae(scene: Scene) -> bytes:
         mesh_data_offset = b.tell()
         b.patch(patch_offset, u32(mesh_data_offset))
 
-        submesh_data_offset = mesh_data_offset + 84
+        submesh_data_offset = mesh_data_offset + (136 if legacy_layout else 84)
         vertex_data_patch = mesh_data_offset + 80
         bbox_min, bbox_max = bounds(mesh.vertices)
 
@@ -853,6 +1114,9 @@ def build_inner_bdae(scene: Scene) -> bytes:
             + u32(0)
         )
 
+        if legacy_layout:
+            b.write(b"\0" * 52)
+
         submesh_index_patches: List[int] = []
         for submesh in mesh.submeshes:
             material_offset = string_offsets[submesh.material]
@@ -868,21 +1132,10 @@ def build_inner_bdae(scene: Scene) -> bytes:
             b.write(u32(0))
             b.write(u32(0) + u32(0))
 
-        b.align(4)
-        vertex_data_offset = b.tell()
-        b.patch(vertex_data_patch, u32(vertex_data_offset))
-        b.write(u32(0))
-        for vertex in mesh.vertices:
-            b.write(vec3(vertex.position) + vec3(vertex.normal) + vec2(vertex.uv))
+        add_removable(1, vertex_payload(mesh), vertex_data_patch)
 
         for submesh, index_patch in zip(mesh.submeshes, submesh_index_patches):
-            b.align(4)
-            index_data_offset = b.tell()
-            b.patch(index_patch, u32(index_data_offset))
-            b.write(u32(0))
-            for index in submesh.indices:
-                b.write(u16(index))
-            b.align(4)
+            add_removable(1, index_payload(submesh), index_patch)
 
     mesh_skin_metadata_offset = b.tell()
     skin_data_patches: List[int] = []
@@ -953,24 +1206,8 @@ def build_inner_bdae(scene: Scene) -> bytes:
         for bbox_min, bbox_max in skin.bounding_boxes:
             b.write(vec3(bbox_min) + vec3(bbox_max))
 
-        b.align(4)
-        influence_data_offset = b.tell()
-        b.patch(influence_data_patch, u32(influence_data_offset))
-        b.write(u32(0))
-        for vertex_influences in skin.influences:
-            limited = vertex_influences[: skin.max_influence]
-            bone_indices = [bone_index for bone_index, _ in limited]
-            weights = [weight for _, weight in limited]
-            bone_indices += [0] * (4 - len(bone_indices))
-            weights += [0.0] * (skin.max_influence - len(weights))
-            b.write(bytes(bone_indices[:4]))
-            for weight in weights[: skin.max_influence]:
-                b.write(f32(weight))
-
-        b.align(4)
-        unknown_data_offset = b.tell()
-        b.patch(unknown_data_patch, u32(unknown_data_offset))
-        b.write(u32(0) * max(bone_count, 1))
+        add_removable(2, influence_payload(skin), influence_data_patch)
+        add_pending_removable(optimized_skin_payload(skin), unknown_data_patch)
 
     root_nodes = scene.root_nodes
     if not root_nodes:
@@ -989,8 +1226,8 @@ def build_inner_bdae(scene: Scene) -> bytes:
     node_tree_metadata_offset = b.tell()
     node_tree_data_patch = b.tell() + 12
     b.write(
-        u32(string_offsets["scene"])
-        + u32(string_offsets["scene"])
+        u32(string_offsets[scene.node_tree_id])
+        + u32(string_offsets[scene.node_tree_name])
         + u32(len(root_nodes))
         + u32(0)
     )
@@ -1037,19 +1274,71 @@ def build_inner_bdae(scene: Scene) -> bytes:
     node_tree_data_offset = write_node_block(root_nodes)
     b.patch(node_tree_data_patch, u32(node_tree_data_offset))
 
+    legacy_scene_offset = 0
+    if legacy_layout:
+        b.write(b"\0" * 144)
+        legacy_scene_offset = b.tell()
+        scene_url = f"#{scene.node_tree_id}"
+        scene_url_offset = string_offsets.get(scene_url, string_offsets.get(""))
+        b.write(u32(6) + u32(legacy_scene_offset + 8) + u32(0) + u32(scene_url_offset))
+
     removable_offset = b.tell()
-    size_removable = 0
+    removable_sizes = [4 + len(chunk.payload) for chunk in removable_chunks]
+    metadata_size = 8 * len(removable_chunks)
+    removable_starts: List[int] = []
+    cursor = removable_offset + metadata_size
+    for size in removable_sizes:
+        removable_starts.append(cursor)
+        cursor += size
+
+    for patch_offset, chunk_index in removable_offset_patches:
+        b.patch(patch_offset, u32(removable_starts[chunk_index]))
+
+    for chunk, chunk_start in zip(removable_chunks, removable_starts):
+        for patch_offset, target_offset in chunk.offset_patches:
+            chunk.payload[patch_offset : patch_offset + 4] = u32(chunk_start + 4 + target_offset)
+
+    for size, start in zip(removable_sizes, removable_starts):
+        b.write(u32(size) + u32(start))
+
+    for chunk in removable_chunks:
+        b.write(u32(chunk.type_id))
+        b.write(bytes(chunk.payload))
+
+    size_removable = b.tell() - removable_offset
     dynamic_size = 0
     file_size = b.tell()
 
     model_info = bytearray()
     model_info += u32(string_offsets[BDAE_VERSION_STRING])
-    model_info += u32(0) * 6
-    model_info += s32(0)
-    model_info += s32(0)
-    model_info += u32(0)
-    model_info += u32(0)
-    model_info += u32(0) * 8
+    if legacy_layout:
+        model_info += (
+            u32(0)
+            + u32(0)
+            + u32(1)
+            + u32(0)
+            + u32(15)
+            + u32(0)
+            + u32(0x7FFFFFFF)
+            + u32(0x80000000)
+            + u32(0)
+            + u32(0)
+            + u32(0)
+            + u32(legacy_config_offset + 8)
+            + u32(0)
+            + u32(0)
+            + u32(0)
+            + u32(0)
+            + u32(0)
+            + u32(0)
+        )
+    else:
+        model_info += u32(0) * 6
+        model_info += s32(0)
+        model_info += s32(0)
+        model_info += u32(0)
+        model_info += u32(0)
+        model_info += u32(0) * 8
     model_info += u32(len(textures))
     model_info += u32(texture_metadata_offset)
     model_info += u32(0) + u32(0)
@@ -1062,7 +1351,11 @@ def build_inner_bdae(scene: Scene) -> bytes:
     model_info += (u32(0) + u32(0)) * 4
     model_info += u32(1)
     model_info += u32(node_tree_metadata_offset)
-    model_info += (u32(0) + u32(0)) * 4
+    if legacy_layout:
+        model_info += (u32(0) + u32(0)) * 3
+        model_info += u32(1) + u32(legacy_scene_offset)
+    else:
+        model_info += (u32(0) + u32(0)) * 4
     assert len(model_info) == 188
     b.patch(model_info_patch, bytes(model_info))
 
@@ -1077,10 +1370,10 @@ def build_inner_bdae(scene: Scene) -> bytes:
     header += u32(offset_table_offset)
     header += u32(string_table_offset)
     header += u32(model_info_offset)
-    header += u32(0)
+    header += u32(legacy_config_offset if legacy_layout else 0)
     header += u32(removable_offset)
     header += u32(size_removable)
-    header += u32(0)
+    header += u32(len(removable_chunks))
     header += u32(0)
     header += u32(dynamic_size)
     assert len(header) == header_size
