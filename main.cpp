@@ -278,11 +278,31 @@ int main()
 			if (IGFD::FileDialog::Instance()->IsOk())
 			{
 				std::map<std::string, std::string> selection = IGFD::FileDialog::Instance()->GetSelection(); // returns pairs (file name, full path)
+				std::filesystem::path selectedPath = selection.empty() ? IGFD::FileDialog::Instance()->GetFilePathName(IGFD_ResultMode_KeepInputFile) : selection.begin()->second;
 
 				if (!isTerrainViewer)
-					bdaeModel.load(selection.begin()->second.c_str(), ourSound, isTerrainViewer);
+				{
+					if (std::filesystem::is_directory(selectedPath))
+					{
+						std::filesystem::path tmpOutputPath = "data/tmp/imported.bdae";
+						std::string command = "python3 tools/dae2bdae.py \"" + selectedPath.string() + "\" --import-temp --no-source";
+
+						// execute dae2bdae.py script
+						if (std::system(command.c_str()) == 0 && std::filesystem::exists(tmpOutputPath))
+						{
+							std::cout << "[Import] Loading converted DAE: " << tmpOutputPath << std::endl;
+							bdaeModel.load(tmpOutputPath.string().c_str(), ourSound, false);
+
+							std::filesystem::remove(tmpOutputPath);
+						}
+						else
+							std::cerr << "[Import] Failed to import DAE from folder: " << selectedPath << std::endl;
+					}
+					else
+						bdaeModel.load(selectedPath.string().c_str(), ourSound, isTerrainViewer);
+				}
 				else
-					terrainModel.load(selection.begin()->second.c_str(), ourSound);
+					terrainModel.load(selectedPath.string().c_str(), ourSound);
 			}
 
 			cfg.path = ImGuiFileDialog::Instance()->GetCurrentPath(); // save most recent path

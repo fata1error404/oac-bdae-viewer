@@ -4147,12 +4147,14 @@ void IGFD::FileDialog::m_SelectableItem(int vRowIdx, std::shared_ptr<FileInfos> 
                 } else if (fdi.dLGDirectoryMode) {  // directory chooser
                     fdi.SelectOrDeselectFileName(m_FileDialogInternal, vInfos);
                 } else {
-                    fdi.pathClicked = fdi.SelectDirectory(vInfos);
+                    fdi.SelectOrDeselectFileName(m_FileDialogInternal, vInfos);
                 }
             } else {                                   // no nav system => classic behavior
                 if (ImGui::IsMouseDoubleClicked(0)) {  // 0 -> left mouse button double click
                     fdi.pathClicked = fdi.SelectDirectory(vInfos);
                 } else if (fdi.dLGDirectoryMode) {  // directory chooser
+                    fdi.SelectOrDeselectFileName(m_FileDialogInternal, vInfos);
+                } else {
                     fdi.SelectOrDeselectFileName(m_FileDialogInternal, vInfos);
                 }
             }
