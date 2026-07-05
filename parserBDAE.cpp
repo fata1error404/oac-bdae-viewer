@@ -782,9 +782,12 @@ void Model::load(const char *fpath, Sound &sound, bool isTerrainViewer)
 		modelCenter /= vertices.size();
 
 		// 3. process strings retrieved from .bdae
-		const char *subDirStart = std::strstr(modelPath.c_str(), "/model/") + 7; // subpath starts after '/model/' (texture and model files have the same subpath, e.g. 'creature/pet/')
-		const char *subDirEnd = std::strrchr(modelPath.c_str(), '/') + 1;		 // last '/' before the file name
-		std::string textureSubDir(subDirStart, subDirEnd);
+		const char *subDirStart = std::strstr(modelPath.c_str(), "/model/"); // subpath starts after '/model/' (texture and model files have the same subpath, e.g. 'creature/pet/')
+		const char *subDirEnd = std::strrchr(modelPath.c_str(), '/');		 // last '/' before the file name
+		std::string textureSubDir;
+
+		if (subDirStart && subDirEnd)
+			textureSubDir = std::string(subDirStart + 7, subDirEnd + 1);
 
 		bool isUnsortedFolder = false; // for 'unsorted' folder
 

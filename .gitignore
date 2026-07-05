@@ -2,7 +2,16 @@
 
 app
 data/
-tools/
+tools/__pycache__
+tools/amz-unpack
+tools/bin-header-replacement
+tools/__pycache__
+tools/valgrind.supp
+
+tools/generated_puppy_dragon.bdae
+tools/puppy_dragon.bdae
+tools/example.dae
+tools/example.bdae
 
 README.pdf
 

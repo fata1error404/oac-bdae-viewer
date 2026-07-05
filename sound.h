@@ -31,6 +31,9 @@ class Sound
 	{
 		selectedSound = 0;
 
+		if (!std::filesystem::is_directory(soundPath))
+			return;
+
 		std::string baseFileName = std::filesystem::path(fname).stem().string();
 
 		for (const std::filesystem::directory_entry &entry : std::filesystem::directory_iterator(soundPath))
